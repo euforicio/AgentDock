@@ -8,6 +8,7 @@ MIN_SYSTEM_VERSION="26.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${AGENTDOCK_DIST_DIR:-$ROOT_DIR/dist}"
+BUILD_SCRATCH_DIR="${AGENTDOCK_BUILD_SCRATCH_DIR:-$ROOT_DIR/.build}"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
@@ -29,7 +30,10 @@ BUILD_NUMBER="${AGENTDOCK_BUILD_NUMBER:-${CODEXER_BUILD_NUMBER:-${GITHUB_RUN_NUM
 SIGNING_IDENTITY="${AGENTDOCK_SIGNING_IDENTITY:-${CODEXER_SIGNING_IDENTITY:--}}"
 SIGNING_KEYCHAIN="${AGENTDOCK_SIGNING_KEYCHAIN:-${CODEXER_SIGNING_KEYCHAIN:-}}"
 
-BUILD_ARGUMENTS=(-c release)
+BUILD_ARGUMENTS=(
+  -c release
+  --scratch-path "$BUILD_SCRATCH_DIR"
+)
 append_prefix_map() {
   local source_path="${1%/}"
   local replacement_path="$2"
@@ -61,16 +65,17 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_LICENSES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$HELPER_BINARY" "$APP_RESOURCES/AgentDockShortcutLauncher"
+cp -R "$BUILD_DIR/Highlightr_Highlightr.bundle" "$APP_RESOURCES/"
 cp "$ROOT_DIR/LICENSE" "$APP_RESOURCES/LICENSE.txt"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md"
 cp "$ROOT_DIR/Vendor/streamdown-swift/LICENSE" "$APP_LICENSES/Streamdown-FSL-1.1-MIT.txt"
-cp "$ROOT_DIR/.build/checkouts/MarkdownView/LICENSE" "$APP_LICENSES/MarkdownView-MIT.txt"
-cp "$ROOT_DIR/.build/checkouts/swift-markdown/LICENSE.txt" "$APP_LICENSES/swift-markdown-Apache-2.0.txt"
-cp "$ROOT_DIR/.build/checkouts/swift-markdown/NOTICE.txt" "$APP_LICENSES/swift-markdown-NOTICE.txt"
-cp "$ROOT_DIR/.build/checkouts/Highlightr/LICENSE" "$APP_LICENSES/Highlightr-MIT.txt"
-cp "$ROOT_DIR/.build/checkouts/Highlightr/src/assets/highlighter/LICENSE" "$APP_LICENSES/highlight.js-BSD-3-Clause.txt"
-cp "$ROOT_DIR/.build/checkouts/RichText/LICENSE" "$APP_LICENSES/RichText-MIT.txt"
-cp "$ROOT_DIR/.build/checkouts/swift-cmark/COPYING" "$APP_LICENSES/swift-cmark-COPYING.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/MarkdownView/LICENSE" "$APP_LICENSES/MarkdownView-MIT.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/swift-markdown/LICENSE.txt" "$APP_LICENSES/swift-markdown-Apache-2.0.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/swift-markdown/NOTICE.txt" "$APP_LICENSES/swift-markdown-NOTICE.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/Highlightr/LICENSE" "$APP_LICENSES/Highlightr-MIT.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/Highlightr/src/assets/highlighter/LICENSE" "$APP_LICENSES/highlight.js-BSD-3-Clause.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/RichText/LICENSE" "$APP_LICENSES/RichText-MIT.txt"
+cp "$BUILD_SCRATCH_DIR/checkouts/swift-cmark/COPYING" "$APP_LICENSES/swift-cmark-COPYING.txt"
 chmod 0644 "$APP_RESOURCES/LICENSE.txt" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md" "$APP_LICENSES"/*.txt
 if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then
   cp "$ROOT_DIR/Assets/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
