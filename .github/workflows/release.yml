@@ -173,10 +173,16 @@ jobs:
             -mountpoint "$privacy_mount" >/dev/null
 
           leaked_path=""
+          leaked_path_value=""
           while IFS= read -r -d '' candidate; do
-            if /usr/bin/strings -a "$candidate" \
-              | /usr/bin/grep -Eq '/Users/|/private/var/|/var/folders/|runner/work'; then
+            matched_build_path="$(
+              /usr/bin/strings -a "$candidate" \
+                | /usr/bin/grep -E '/Users/|/private/var/|/var/folders/|runner/work' \
+                || true
+            )"
+            if [[ -n "$matched_build_path" ]]; then
               leaked_path="${candidate#"$privacy_mount"/}"
+              leaked_path_value="${matched_build_path%%$'\n'*}"
               break
             fi
           done < <(/usr/bin/find "$privacy_mount" -type f -print0)
@@ -184,7 +190,7 @@ jobs:
           cleanup_privacy_mount
           trap - EXIT
           if [[ -n "$leaked_path" ]]; then
-            echo "DMG contains a build-machine path in $leaked_path." >&2
+            echo "DMG contains a build-machine path in $leaked_path: $leaked_path_value" >&2
             exit 1
           fi
 

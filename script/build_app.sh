@@ -29,16 +29,28 @@ BUILD_NUMBER="${AGENTDOCK_BUILD_NUMBER:-${CODEXER_BUILD_NUMBER:-${GITHUB_RUN_NUM
 SIGNING_IDENTITY="${AGENTDOCK_SIGNING_IDENTITY:-${CODEXER_SIGNING_IDENTITY:--}}"
 SIGNING_KEYCHAIN="${AGENTDOCK_SIGNING_KEYCHAIN:-${CODEXER_SIGNING_KEYCHAIN:-}}"
 
-SOURCE_PREFIX_MAP="$ROOT_DIR=/workspace/AgentDock"
-BUILD_ARGUMENTS=(
-  -c release
-  -Xswiftc -debug-prefix-map
-  -Xswiftc "$SOURCE_PREFIX_MAP"
-  -Xswiftc -file-prefix-map
-  -Xswiftc "$SOURCE_PREFIX_MAP"
-  -Xcc "-fdebug-prefix-map=$SOURCE_PREFIX_MAP"
-  -Xcc "-ffile-prefix-map=$SOURCE_PREFIX_MAP"
-)
+BUILD_ARGUMENTS=(-c release)
+append_prefix_map() {
+  local source_path="${1%/}"
+  local replacement_path="$2"
+  local prefix_map="$source_path=$replacement_path"
+  BUILD_ARGUMENTS+=(
+    -Xswiftc -debug-prefix-map
+    -Xswiftc "$prefix_map"
+    -Xswiftc -file-prefix-map
+    -Xswiftc "$prefix_map"
+    -Xcc "-fdebug-prefix-map=$prefix_map"
+    -Xcc "-ffile-prefix-map=$prefix_map"
+  )
+}
+
+append_prefix_map "$ROOT_DIR" "/workspace/AgentDock"
+if [[ -n "${RUNNER_TEMP:-}" ]]; then
+  append_prefix_map "$(dirname "$RUNNER_TEMP")" "/workspace"
+fi
+if [[ -n "${TMPDIR:-}" ]]; then
+  append_prefix_map "$TMPDIR" "/workspace/tmp"
+fi
 
 swift build "${BUILD_ARGUMENTS[@]}"
 BUILD_DIR="$(swift build "${BUILD_ARGUMENTS[@]}" --show-bin-path)"
