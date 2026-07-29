@@ -29,8 +29,19 @@ BUILD_NUMBER="${AGENTDOCK_BUILD_NUMBER:-${CODEXER_BUILD_NUMBER:-${GITHUB_RUN_NUM
 SIGNING_IDENTITY="${AGENTDOCK_SIGNING_IDENTITY:-${CODEXER_SIGNING_IDENTITY:--}}"
 SIGNING_KEYCHAIN="${AGENTDOCK_SIGNING_KEYCHAIN:-${CODEXER_SIGNING_KEYCHAIN:-}}"
 
-swift build -c release
-BUILD_DIR="$(swift build -c release --show-bin-path)"
+SOURCE_PREFIX_MAP="$ROOT_DIR=/workspace/AgentDock"
+BUILD_ARGUMENTS=(
+  -c release
+  -Xswiftc -debug-prefix-map
+  -Xswiftc "$SOURCE_PREFIX_MAP"
+  -Xswiftc -file-prefix-map
+  -Xswiftc "$SOURCE_PREFIX_MAP"
+  -Xcc "-fdebug-prefix-map=$SOURCE_PREFIX_MAP"
+  -Xcc "-ffile-prefix-map=$SOURCE_PREFIX_MAP"
+)
+
+swift build "${BUILD_ARGUMENTS[@]}"
+BUILD_DIR="$(swift build "${BUILD_ARGUMENTS[@]}" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$PRODUCT_BINARY_NAME"
 HELPER_BINARY="$BUILD_DIR/AgentDockShortcutLauncher"
 
