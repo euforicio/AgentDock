@@ -1,0 +1,1331 @@
+import AppKit
+import CodexerCore
+import SwiftUI
+
+enum CodexerSidebarSelection: Hashable {
+    case official(DesktopProduct)
+    case profile(CodexProfile.ID)
+}
+
+enum AgentDockDetailTab: String, CaseIterable, Identifiable {
+    case overview
+    case chats
+    case advanced
+
+    var id: Self { self }
+
+    var title: String {
+        rawValue.capitalized
+    }
+
+    static func availableTabs(hasManagedProfile: Bool) -> [Self] {
+        hasManagedProfile ? allCases : [.overview, .chats]
+    }
+}
+
+@MainActor
+final class CodexerModel: ObservableObject {
+    @Published private(set) var profiles: [CodexProfile] = []
+    @Published var sidebarSelection: CodexerSidebarSelection?
+    @Published private(set) var appURLs: [DesktopProduct: URL]
+    @Published var errorMessage: String?
+    @Published var showAddProfile = false
+    @Published var showEditProfile = false
+    @Published var detailTab: AgentDockDetailTab = .overview
+    @Published var pendingRemoveProfile: CodexProfile?
+    @Published var pendingDeleteProfile: CodexProfile?
+    @Published private(set) var chatSessions: [LocalChatSession] = []
+    @Published private(set) var chatAvailability: LocalChatAvailability = .available
+    @Published private(set) var chatsLoading = false
+    @Published private(set) var chatTranscriptLoading = false
+    @Published private(set) var chatOlderTranscriptLoading = false
+    @Published private(set) var chatTranscriptEntries: [LocalChatTranscriptEntry] = []
+    @Published private(set) var chatTranscriptSourceChanged = false
+    @Published var selectedChatID: LocalChatSession.ID?
+    @Published var preferences: AgentDockPreferences {
+        didSet {
+            preferencesStore.save(preferences)
+            configureProfileActivityRefresh()
+        }
+    }
+    @Published private(set) var profileStats: [CodexProfile.ID: ProfileStats] = [:]
+    @Published private(set) var statsLoadingProfileIDs: Set<CodexProfile.ID> = []
+    @Published private(set) var profileRateLimits: [CodexProfile.ID: ProfileRateLimits] = [:]
+    @Published private(set) var officialCodexStats = ProfileStats.empty
+    @Published private(set) var officialStatsLoading = false
+    @Published private(set) var officialCodexRateLimits: ProfileRateLimits?
+    @Published private(set) var profileInstanceStatuses: [CodexProfile.ID: CodexInstanceStatus] = [:]
+    @Published private(set) var stockInstanceStatuses: [DesktopProduct: CodexInstanceStatus] = [:]
+    @Published private(set) var installedShortcutProfileIDs: Set<CodexProfile.ID> = []
+    @Published private(set) var busyProfileIDs: Set<CodexProfile.ID> = []
+    @Published private(set) var busyStockProducts: Set<DesktopProduct> = []
+    @Published private(set) var storeMutationInProgress = false
+
+    private var store: ProfileStore?
+    private let instanceController: any DesktopInstanceManaging
+    private let shortcutInstaller: any ShortcutManaging
+    private let statsScanner: any ProfileStatsScanning
+    private let rateLimitClient: any ProfileRateLimitFetching
+    private let chatScanner: LocalChatScanner
+    private let preferencesStore: AgentDockPreferencesStore
+    private let appPathKeyPrefix = "AgentDock.desktopAppPath"
+    private var statsRefreshTask: Task<Void, Never>?
+    private var rateLimitRefreshTask: Task<Void, Never>?
+    private var instanceMonitorTask: Task<Void, Never>?
+    private var chatRefreshTask: Task<Void, Never>?
+    private var chatTranscriptTask: Task<Void, Never>?
+    private var chatChangeMonitorTask: Task<Void, Never>?
+    private var profileActivityRefreshTask: Task<Void, Never>?
+    private var workspaceNotificationTasks: [Task<Void, Never>] = []
+    private var allowsAutomaticRefresh = false
+    private var statsGeneration = 0
+    private var rateLimitGeneration = 0
+    private var chatGeneration = 0
+    private var chatTranscriptGeneration = 0
+    private var chatTranscriptCursor: LocalChatTranscriptCursor?
+    private var loadedChatSelection: CodexerSidebarSelection?
+    private var appliedInitialDefaultView = false
+    private let officialCodexHomeURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex", isDirectory: true)
+    private let officialClaudeUserDataURL = FileManager.default.urls(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask
+    )[0].appendingPathComponent("Claude", isDirectory: true)
+    private let officialClaudeCodeHomeURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".claude", isDirectory: true)
+
+    init() {
+        let preferencesStore = AgentDockPreferencesStore()
+        self.preferencesStore = preferencesStore
+        preferences = preferencesStore.load()
+        chatScanner = LocalChatScanner()
+        instanceController = DesktopInstanceController()
+        shortcutInstaller = ShortcutInstaller()
+        statsScanner = ProfileStatsScanner()
+        rateLimitClient = AppServerRateLimitClient()
+        allowsAutomaticRefresh = true
+        let storedPaths: [DesktopProduct: String?] = [
+            .codex: UserDefaults.standard.string(
+                forKey: "AgentDock.desktopAppPath.codex"
+            ) ?? UserDefaults.standard.string(forKey: "Codexer.desktopAppPath.codex")
+                ?? UserDefaults.standard.string(forKey: "Codexer.codexAppPath"),
+            .claude: UserDefaults.standard.string(
+                forKey: "AgentDock.desktopAppPath.claude"
+            ) ?? UserDefaults.standard.string(forKey: "Codexer.desktopAppPath.claude")
+        ]
+        appURLs = [
+            .codex: storedPaths[.codex].flatMap { $0 }.map(URL.init(fileURLWithPath:))
+                ?? CodexAppLocator.defaultCodexAppURL()
+                ?? DesktopAppRegistry.codex.defaultAppURL,
+            .claude: storedPaths[.claude].flatMap { $0 }.map(URL.init(fileURLWithPath:))
+                ?? DesktopAppRegistry.claude.defaultAppURL
+        ]
+        startInstanceMonitoring()
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result {
+                    let selection = Self.validatedAppSelections(storedPaths: storedPaths)
+                    return (
+                        try ProfileStore(codexAppURL: selection.urls[.codex]),
+                        selection
+                    )
+                }
+            }.value
+            guard let self else { return }
+            switch result {
+            case let .success((store, selection)):
+                self.store = store
+                self.appURLs = selection.urls
+                self.errorMessage = selection.errorMessages.first
+                self.reload()
+                self.configureProfileActivityRefresh()
+                await self.refreshInstanceStatuses()
+            case let .failure(error):
+                self.store = nil
+                self.errorMessage = "AgentDock could not load profile metadata safely: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    init(
+        store: ProfileStore,
+        codexAppURL: URL,
+        claudeAppURL: URL = DesktopAppRegistry.claude.defaultAppURL,
+        instanceController: any DesktopInstanceManaging = DesktopInstanceController(),
+        shortcutInstaller: any ShortcutManaging = ShortcutInstaller(),
+        statsScanner: any ProfileStatsScanning = ProfileStatsScanner(),
+        rateLimitClient: any ProfileRateLimitFetching = AppServerRateLimitClient(),
+        preferencesStore: AgentDockPreferencesStore = AgentDockPreferencesStore(),
+        chatScanner: LocalChatScanner = LocalChatScanner(),
+        startMonitoring: Bool = false
+    ) {
+        self.preferencesStore = preferencesStore
+        preferences = preferencesStore.load()
+        self.chatScanner = chatScanner
+        self.store = store
+        appURLs = [.codex: codexAppURL, .claude: claudeAppURL]
+        self.instanceController = instanceController
+        self.shortcutInstaller = shortcutInstaller
+        self.statsScanner = statsScanner
+        self.rateLimitClient = rateLimitClient
+        allowsAutomaticRefresh = startMonitoring
+        reload()
+        if startMonitoring {
+            startInstanceMonitoring()
+        }
+        configureProfileActivityRefresh()
+    }
+
+    deinit {
+        statsRefreshTask?.cancel()
+        rateLimitRefreshTask?.cancel()
+        instanceMonitorTask?.cancel()
+        chatRefreshTask?.cancel()
+        chatTranscriptTask?.cancel()
+        chatChangeMonitorTask?.cancel()
+        profileActivityRefreshTask?.cancel()
+        workspaceNotificationTasks.forEach { $0.cancel() }
+    }
+
+    var codexAppURL: URL {
+        appURL(for: .codex)
+    }
+
+    var claudeAppURL: URL {
+        appURL(for: .claude)
+    }
+
+    var stockInstanceStatus: CodexInstanceStatus {
+        stockInstanceStatuses[.codex] ?? CodexInstanceStatus()
+    }
+
+    var stockOperationInProgress: Bool {
+        busyStockProducts.contains(.codex)
+    }
+
+    func appURL(for product: DesktopProduct) -> URL {
+        appURLs[product] ?? DesktopAppRegistry.descriptor(for: product).defaultAppURL
+    }
+
+    var selectedProfile: CodexProfile? {
+        guard selectedOfficialProduct == nil else { return nil }
+        return profiles.first { $0.id == selectedProfileID } ?? profiles.first
+    }
+
+    var selectedProfileID: CodexProfile.ID? {
+        get {
+            guard case let .profile(id) = sidebarSelection else { return nil }
+            return id
+        }
+        set {
+            sidebarSelection = newValue.map(CodexerSidebarSelection.profile)
+        }
+    }
+
+    var showsOfficialCodex: Bool {
+        selectedOfficialProduct == .codex
+    }
+
+    var selectedOfficialProduct: DesktopProduct? {
+        guard case let .official(product) = sidebarSelection else { return nil }
+        return product
+    }
+
+    func selectOfficialCodex() {
+        selectOfficial(.codex)
+    }
+
+    func selectOfficial(_ product: DesktopProduct) {
+        if detailTab == .advanced {
+            detailTab = .overview
+        }
+        sidebarSelection = .official(product)
+        refreshChats()
+    }
+
+    func selectProfile(_ id: CodexProfile.ID?) {
+        sidebarSelection = id.map(CodexerSidebarSelection.profile)
+        refreshChats()
+    }
+
+    func reload(refreshData: Bool = true) {
+        guard let store else { return }
+        profiles = store.profiles
+        installedShortcutProfileIDs = Set(
+            profiles.lazy.filter { self.shortcutInstaller.shortcutExists(for: $0) }.map(\.id)
+        )
+        if selectedOfficialProduct == nil,
+           selectedProfileID == nil || !profiles.contains(where: { $0.id == selectedProfileID })
+        {
+            selectedProfileID = profiles.first?.id
+        }
+        if !appliedInitialDefaultView {
+            switch preferences.defaultView {
+            case .lastOpened:
+                if let lastOpened = profiles
+                    .filter({ $0.lastLaunchedAt != nil })
+                    .max(by: {
+                        ($0.lastLaunchedAt ?? .distantPast)
+                            < ($1.lastLaunchedAt ?? .distantPast)
+                    })
+                {
+                    selectedProfileID = lastOpened.id
+                }
+                detailTab = .overview
+            case .overview:
+                detailTab = .overview
+            case .chats:
+                detailTab = .chats
+            }
+            appliedInitialDefaultView = true
+        }
+        if refreshData {
+            refreshStats()
+        }
+    }
+
+    func stats(for profile: CodexProfile) -> ProfileStats {
+        profileStats[profile.id] ?? .empty
+    }
+
+    func statsAreLoading(for profile: CodexProfile) -> Bool {
+        statsLoadingProfileIDs.contains(profile.id)
+    }
+
+    func rateLimits(for profile: CodexProfile) -> ProfileRateLimits? {
+        profileRateLimits[profile.id]
+    }
+
+    func instanceStatus(for profile: CodexProfile) -> CodexInstanceStatus {
+        profileInstanceStatuses[profile.id] ?? CodexInstanceStatus()
+    }
+
+    func isBusy(_ profile: CodexProfile) -> Bool {
+        busyProfileIDs.contains(profile.id)
+    }
+
+    func refreshStats() {
+        refreshStats(for: profiles, replaceAll: true)
+        refreshRateLimits(
+            for: profiles.filter { $0.product == .codex },
+            replaceAll: true
+        )
+    }
+
+    func refreshRateLimits() {
+        refreshRateLimits(
+            for: profiles.filter { $0.product == .codex },
+            replaceAll: true
+        )
+    }
+
+    private func refreshStats(for profiles: [CodexProfile], replaceAll: Bool) {
+        statsRefreshTask?.cancel()
+        statsGeneration += 1
+        let generation = statsGeneration
+        let scanner = statsScanner
+        if replaceAll {
+            statsLoadingProfileIDs = Set(profiles.map(\.id))
+            officialStatsLoading = true
+        } else {
+            statsLoadingProfileIDs.formUnion(profiles.map(\.id))
+        }
+
+        statsRefreshTask = Task { [weak self] in
+            let worker = Task.detached(priority: .utility) {
+                var collected: [CodexProfile.ID: ProfileStats] = [:]
+                let official = replaceAll
+                    ? scanner.stats(
+                        codexHomeURL: FileManager.default.homeDirectoryForCurrentUser
+                            .appendingPathComponent(".codex", isDirectory: true),
+                        dataRootURL: FileManager.default.homeDirectoryForCurrentUser
+                            .appendingPathComponent(".codex", isDirectory: true),
+                        now: Date()
+                    )
+                    : nil
+                for profile in profiles {
+                    guard !Task.isCancelled else { return (collected, official) }
+                    collected[profile.id] = scanner.stats(for: profile, now: Date())
+                }
+                return (collected, official)
+            }
+            let results = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled, let self, self.statsGeneration == generation else { return }
+            self.statsLoadingProfileIDs.subtract(profiles.map(\.id))
+            if replaceAll {
+                self.officialStatsLoading = false
+            }
+            if replaceAll {
+                self.profileStats = results.0
+                if let official = results.1 {
+                    self.officialCodexStats = official
+                }
+            } else {
+                self.profileStats.merge(results.0) { _, new in new }
+            }
+        }
+    }
+
+    private func refreshRateLimits(for profiles: [CodexProfile], replaceAll: Bool) {
+        rateLimitRefreshTask?.cancel()
+        rateLimitGeneration += 1
+        let generation = rateLimitGeneration
+        let client = rateLimitClient
+        let appURL = codexAppURL
+        let officialHomeURL = officialCodexHomeURL
+
+        rateLimitRefreshTask = Task { [weak self] in
+            let officialWorker = Task.detached(priority: .utility) {
+                replaceAll
+                    ? client.fetchRateLimits(
+                        codexHomeURL: officialHomeURL,
+                        codexAppURL: appURL
+                    )
+                    : nil
+            }
+            let results = await withTaskGroup(
+                of: (CodexProfile.ID, ProfileRateLimits).self,
+                returning: [CodexProfile.ID: ProfileRateLimits].self
+            ) { group in
+                var iterator = profiles.makeIterator()
+                for _ in 0..<min(4, profiles.count) {
+                    if let profile = iterator.next() {
+                        group.addTask {
+                            (profile.id, client.fetchRateLimits(for: profile, codexAppURL: appURL))
+                        }
+                    }
+                }
+
+                var collected: [CodexProfile.ID: ProfileRateLimits] = [:]
+                while let (id, limits) = await group.next() {
+                    guard !Task.isCancelled else {
+                        group.cancelAll()
+                        return [:]
+                    }
+                    collected[id] = limits
+                    if let profile = iterator.next() {
+                        group.addTask {
+                            (profile.id, client.fetchRateLimits(for: profile, codexAppURL: appURL))
+                        }
+                    }
+                }
+                return collected
+            }
+            let official = await officialWorker.value
+
+            guard !Task.isCancelled, let self, self.rateLimitGeneration == generation else { return }
+            if replaceAll {
+                self.profileRateLimits = results
+                self.officialCodexRateLimits = official
+            } else {
+                self.profileRateLimits.merge(results) { _, new in new }
+            }
+        }
+    }
+
+    @discardableResult
+    func addProfile(
+        product: DesktopProduct = .codex,
+        name: String,
+        color: Color,
+        iconKind: ProfileIconKind = .monogram,
+        iconValue: String = "",
+        customIconData: Data? = nil
+    ) async -> Bool {
+        guard beginStoreMutationIfAvailable() else { return false }
+        guard let store else {
+            storeMutationInProgress = false
+            present(CodexerModelError.storeUnavailable)
+            return false
+        }
+        errorMessage = nil
+        let iconColor = color.hexString
+        let worker = Task.detached(priority: .userInitiated) {
+            try store.createProfile(
+                product: product,
+                name: name,
+                iconColor: iconColor,
+                iconKind: iconKind,
+                iconValue: iconValue,
+                customIconData: customIconData
+            )
+        }
+        defer { storeMutationInProgress = false }
+        do {
+            let profile = try await withTaskCancellationHandler {
+                try await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            try Task.checkCancellation()
+            reload()
+            selectProfile(profile.id)
+            errorMessage = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            present(error)
+            return false
+        }
+    }
+
+    func restoreProfile(product: DesktopProduct? = nil) {
+        guard beginStoreMutationIfAvailable() else { return }
+        guard let store else {
+            storeMutationInProgress = false
+            errorMessage = CodexerModelError.storeUnavailable.localizedDescription
+            return
+        }
+        let selectedProduct = product
+            ?? selectedProfile?.product
+            ?? selectedOfficialProduct
+            ?? .codex
+        let panel = NSOpenPanel()
+        panel.title = "Restore \(selectedProduct.displayName) Profile"
+        panel.prompt = "Restore"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = store.profilesRootDirectory(for: selectedProduct)
+
+        guard panel.runModal() == .OK, let directory = panel.url else {
+            storeMutationInProgress = false
+            return
+        }
+
+        let name = directory.lastPathComponent.replacingOccurrences(of: "-", with: " ").capitalized
+        Task { [weak self] in
+            guard let self else { return }
+            defer { storeMutationInProgress = false }
+            do {
+                let profile = try await Task.detached(priority: .userInitiated) {
+                    try store.restoreProfile(
+                        product: selectedProduct,
+                        name: name,
+                        profileDirectory: directory
+                    )
+                }.value
+                reload()
+                selectProfile(profile.id)
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func chooseCodexApp() {
+        chooseApp(.codex)
+    }
+
+    func chooseApp(_ product: DesktopProduct) {
+        guard !profiles.contains(where: {
+            $0.product == product && instanceStatus(for: $0).isRunning
+        }) else {
+            errorMessage = "Close running \(product.displayName) profiles before changing the provider app."
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "Select \(product.displayName).app"
+        panel.prompt = "Select"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await instanceController.validateApp(product: product, at: url)
+                let shortcutProfiles = profiles.filter {
+                    $0.product == product && self.shortcutExists(for: $0)
+                }
+                let installer = shortcutInstaller
+                try await Task.detached(priority: .userInitiated) {
+                    for profile in shortcutProfiles {
+                        try installer.installShortcut(for: profile, codexAppURL: url)
+                    }
+                }.value
+                appURLs[product] = url
+                UserDefaults.standard.set(
+                    url.path,
+                    forKey: "\(appPathKeyPrefix).\(product.rawValue)"
+                )
+                errorMessage = nil
+                installedShortcutProfileIDs.formUnion(shortcutProfiles.map(\.id))
+                if product == .codex {
+                    refreshRateLimits()
+                }
+                await refreshInstanceStatuses()
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func launch(_ profile: CodexProfile) {
+        guard !isBusy(profile), !storeMutationInProgress else { return }
+        busyProfileIDs.insert(profile.id)
+        let appURL = appURL(for: profile.product)
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { busyProfileIDs.remove(profile.id) }
+            do {
+                guard let store else { throw CodexerModelError.storeUnavailable }
+                _ = try await instanceController.open(profile: profile, appURL: appURL)
+                try await Task.detached(priority: .utility) {
+                    try store.markLaunched(id: profile.id)
+                }.value
+                reload(refreshData: false)
+                if let updated = store.profiles.first(where: { $0.id == profile.id }) {
+                    refreshStats(for: [updated], replaceAll: false)
+                    if updated.product == .codex {
+                        refreshRateLimits(for: [updated], replaceAll: false)
+                    }
+                }
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+            await refreshInstanceStatuses()
+        }
+    }
+
+    func openStockCodex() {
+        openStock(.codex)
+    }
+
+    func openStock(_ product: DesktopProduct) {
+        guard !busyStockProducts.contains(product) else { return }
+        busyStockProducts.insert(product)
+        let appURL = appURL(for: product)
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { busyStockProducts.remove(product) }
+            do {
+                _ = try await instanceController.openStock(
+                    product: product,
+                    appURL: appURL
+                )
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+            await refreshInstanceStatuses()
+        }
+    }
+
+    func close(_ profile: CodexProfile) {
+        guard !isBusy(profile) else { return }
+        busyProfileIDs.insert(profile.id)
+        let appURL = appURL(for: profile.product)
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { busyProfileIDs.remove(profile.id) }
+            do {
+                _ = try await instanceController.close(profile: profile, appURL: appURL)
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+            await refreshInstanceStatuses()
+        }
+    }
+
+    func installShortcut(_ profile: CodexProfile) {
+        guard !isBusy(profile), !storeMutationInProgress else { return }
+        busyProfileIDs.insert(profile.id)
+        let installer = shortcutInstaller
+        let appURL = appURL(for: profile.product)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { busyProfileIDs.remove(profile.id) }
+            do {
+                try await Task.detached(priority: .utility) {
+                    try installer.installShortcut(for: profile, codexAppURL: appURL)
+                }.value
+                reload(refreshData: false)
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func removeShortcut(_ profile: CodexProfile) {
+        guard !isBusy(profile), !storeMutationInProgress else { return }
+        busyProfileIDs.insert(profile.id)
+        let installer = shortcutInstaller
+        Task { [weak self] in
+            guard let self else { return }
+            defer { busyProfileIDs.remove(profile.id) }
+            do {
+                try await Task.detached(priority: .utility) {
+                    try installer.removeShortcut(for: profile)
+                }.value
+                reload(refreshData: false)
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func removeProfileFromList(_ profile: CodexProfile) {
+        guard beginStoreMutationIfAvailable() else { return }
+        guard let store else {
+            storeMutationInProgress = false
+            present(CodexerModelError.storeUnavailable)
+            return
+        }
+        cancelChatWork()
+        let chatScanner = chatScanner
+        Task { [weak self] in
+            guard let self else { return }
+            defer { storeMutationInProgress = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try store.removeProfile(id: profile.id, policy: .removeFromList)
+                    chatScanner.removeIndex(profileID: profile.id)
+                }.value
+                reload()
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func confirmRemoveProfile(_ profile: CodexProfile) {
+        pendingRemoveProfile = profile
+    }
+
+    func updateProfile(
+        _ profile: CodexProfile,
+        name: String,
+        color: Color,
+        iconKind: ProfileIconKind,
+        iconValue: String,
+        customIconData: Data?
+    ) {
+        guard beginStoreMutationIfAvailable() else { return }
+        guard let store else {
+            storeMutationInProgress = false
+            present(CodexerModelError.storeUnavailable)
+            return
+        }
+        let hadShortcut = shortcutExists(for: profile)
+        let installer = shortcutInstaller
+        let appURL = appURL(for: profile.product)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { storeMutationInProgress = false }
+            do {
+                let updated = try await Task.detached(priority: .userInitiated) {
+                    let result = try store.updateProfile(
+                        id: profile.id,
+                        name: name,
+                        iconColor: color.hexString,
+                        iconKind: iconKind,
+                        iconValue: iconValue,
+                        customIconData: customIconData
+                    )
+                    if hadShortcut {
+                        try installer.installShortcut(for: result, codexAppURL: appURL)
+                    }
+                    return result
+                }.value
+                reload(refreshData: false)
+                selectProfile(updated.id)
+                showEditProfile = false
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func deleteProfileData(_ profile: CodexProfile) {
+        guard beginStoreMutationIfAvailable() else { return }
+        guard let store else {
+            storeMutationInProgress = false
+            present(CodexerModelError.storeUnavailable)
+            return
+        }
+        cancelRefreshes()
+        cancelChatWork()
+        busyProfileIDs.insert(profile.id)
+        let chatScanner = chatScanner
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                storeMutationInProgress = false
+                busyProfileIDs.remove(profile.id)
+            }
+            do {
+                try await Task.detached(priority: .utility) {
+                    try store.removeProfile(id: profile.id, policy: .deleteAllData)
+                    chatScanner.removeIndex(profileID: profile.id)
+                }.value
+                pendingDeleteProfile = nil
+                reload()
+                errorMessage = nil
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func revealData(_ profile: CodexProfile) {
+        NSWorkspace.shared.activateFileViewerSelecting([profile.profileDirectory])
+    }
+
+    func revealOfficialCodexData() {
+        NSWorkspace.shared.activateFileViewerSelecting([officialCodexHomeURL])
+    }
+
+    func revealOfficialData(_ product: DesktopProduct) {
+        switch product {
+        case .codex:
+            revealOfficialCodexData()
+        case .claude:
+            NSWorkspace.shared.activateFileViewerSelecting([
+                FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                )[0].appendingPathComponent("Claude", isDirectory: true)
+            ])
+        }
+    }
+
+    func revealShortcut(_ profile: CodexProfile) {
+        NSWorkspace.shared.activateFileViewerSelecting([profile.shortcutPath])
+    }
+
+    func revealChat(_ session: LocalChatSession) {
+        NSWorkspace.shared.activateFileViewerSelecting([session.sourceURL])
+    }
+
+    func copyChatMetadata(_ session: LocalChatSession) {
+        var lines = [
+            "Provider: \(session.provider.displayName)",
+            "Profile: \(session.profileName)",
+            "Started: \(session.startedAt.formatted(date: .abbreviated, time: .shortened))",
+            "Updated: \(session.updatedAt.formatted(date: .abbreviated, time: .shortened))",
+            "Activity span: \(Self.durationText(session.duration))",
+            "Status: \(session.status)"
+        ]
+        if let model = session.model { lines.append("Model: \(model)") }
+        if let repository = session.repository { lines.append("Folder: \(repository)") }
+        if let branch = session.branch { lines.append("Branch: \(branch)") }
+        if let tokenCount = session.tokenCount { lines.append("Tokens: \(tokenCount)") }
+        let sanitizedID = session.id.count > 12
+            ? "\(session.id.prefix(8))…\(session.id.suffix(6))"
+            : session.id
+        lines.append("Session ID: \(sanitizedID)")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+    }
+
+    private static func durationText(_ duration: TimeInterval) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = duration >= 3600 ? [.hour, .minute] : [.minute, .second]
+        formatter.unitsStyle = .abbreviated
+        return formatter.string(from: duration) ?? "Unavailable"
+    }
+
+    func copyPath(_ url: URL) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.path, forType: .string)
+    }
+
+    func refreshChats() {
+        chatGeneration += 1
+        let generation = chatGeneration
+        chatRefreshTask?.cancel()
+        chatTranscriptTask?.cancel()
+        chatChangeMonitorTask?.cancel()
+        let scanner = chatScanner
+        let selection = sidebarSelection
+        let profiles = profiles
+        let officialHome = officialCodexHomeURL
+        let officialClaudeUserData = officialClaudeUserDataURL
+        let officialClaudeCodeHome = officialClaudeCodeHomeURL
+        let preferredChatID = loadedChatSelection == selection ? selectedChatID : nil
+        chatTranscriptGeneration += 1
+        if loadedChatSelection != selection {
+            selectedChatID = nil
+            chatSessions = []
+            chatTranscriptEntries = []
+            chatTranscriptCursor = nil
+            chatTranscriptSourceChanged = false
+        }
+        chatsLoading = true
+        chatTranscriptLoading = false
+        chatOlderTranscriptLoading = false
+        chatRefreshTask = Task { [weak self] in
+            let worker = Task.detached(priority: .utility) {
+                switch selection {
+                case let .profile(id):
+                    guard let profile = profiles.first(where: { $0.id == id }) else {
+                        return LocalChatScanResult(availability: .available, sessions: [])
+                    }
+                    return scanner.scan(profile: profile)
+                case .official(.codex):
+                    return scanner.scanOfficialCodex(codexHomeURL: officialHome)
+                case .official(.claude):
+                    return scanner.scanOfficialClaude(
+                        claudeHomeURL: officialClaudeUserData,
+                        claudeCodeHomeURL: officialClaudeCodeHome
+                    )
+                case nil:
+                    return LocalChatScanResult(availability: .available, sessions: [])
+                }
+            }
+            let result = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard
+                !Task.isCancelled,
+                let self,
+                self.chatGeneration == generation,
+                self.sidebarSelection == selection
+            else {
+                return
+            }
+            chatSessions = result.sessions
+            chatAvailability = result.availability
+            loadedChatSelection = selection
+            selectedChatID = preferredChatID.flatMap { preferred in
+                result.sessions.contains(where: { $0.id == preferred }) ? preferred : nil
+            } ?? result.sessions.first?.id
+            chatsLoading = false
+            loadSelectedChatTranscript()
+            startChatChangeMonitoring(
+                selection: selection,
+                initialToken: result.changeToken,
+                generation: generation
+            )
+        }
+    }
+
+    func selectChat(_ id: LocalChatSession.ID) {
+        guard id != selectedChatID else { return }
+        selectedChatID = id
+        loadSelectedChatTranscript()
+    }
+
+    private func loadSelectedChatTranscript() {
+        chatTranscriptGeneration += 1
+        let generation = chatTranscriptGeneration
+        chatTranscriptTask?.cancel()
+        chatTranscriptEntries = []
+        chatTranscriptCursor = nil
+        chatTranscriptSourceChanged = false
+        chatOlderTranscriptLoading = false
+        guard
+            let selectedChatID,
+            let summary = chatSessions.first(where: { $0.id == selectedChatID })
+        else {
+            chatTranscriptLoading = false
+            return
+        }
+        let scanner = chatScanner
+        chatTranscriptLoading = true
+        chatTranscriptTask = Task { [weak self] in
+            let worker = Task.detached(priority: .utility) {
+                scanner.loadTranscriptForwardPage(for: summary)
+            }
+            let page = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard
+                !Task.isCancelled,
+                let self,
+                self.selectedChatID == selectedChatID,
+                self.chatTranscriptGeneration == generation
+            else {
+                return
+            }
+            chatTranscriptEntries = page.entries
+            chatTranscriptCursor = page.olderCursor
+            chatTranscriptSourceChanged = page.sourceChanged
+            chatTranscriptLoading = false
+            if
+                let continuation = page.olderCursor,
+                page.entries.isEmpty || continuation.skippingOversizedLine
+            {
+                loadMoreChatTranscript()
+            }
+        }
+    }
+
+    var hasMoreChatTranscript: Bool {
+        chatTranscriptCursor != nil
+    }
+
+    func loadMoreChatTranscript() {
+        guard
+            !chatTranscriptLoading,
+            !chatOlderTranscriptLoading,
+            let cursor = chatTranscriptCursor,
+            let selectedChatID,
+            let summary = chatSessions.first(where: { $0.id == selectedChatID })
+        else {
+            return
+        }
+        let scanner = chatScanner
+        let generation = chatTranscriptGeneration
+        chatOlderTranscriptLoading = true
+        chatTranscriptTask = Task { [weak self] in
+            let worker = Task.detached(priority: .utility) {
+                scanner.loadTranscriptForwardPage(for: summary, after: cursor)
+            }
+            let page = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard
+                !Task.isCancelled,
+                let self,
+                self.selectedChatID == selectedChatID,
+                self.chatTranscriptGeneration == generation
+            else {
+                return
+            }
+            if page.sourceChanged {
+                chatTranscriptEntries = []
+                chatTranscriptCursor = nil
+                chatTranscriptSourceChanged = true
+                chatOlderTranscriptLoading = false
+                loadSelectedChatTranscript()
+                return
+            }
+            chatTranscriptEntries += page.entries
+            chatTranscriptCursor = page.olderCursor
+            chatTranscriptSourceChanged = chatTranscriptSourceChanged || page.sourceChanged
+            chatOlderTranscriptLoading = false
+            if
+                let continuation = page.olderCursor,
+                page.entries.isEmpty || continuation.skippingOversizedLine
+            {
+                loadMoreChatTranscript()
+            }
+        }
+    }
+
+    private func startChatChangeMonitoring(
+        selection: CodexerSidebarSelection?,
+        initialToken: String,
+        generation: Int
+    ) {
+        guard selection != nil, detailTab == .chats else { return }
+        let scanner = chatScanner
+        let profiles = profiles
+        let officialHome = officialCodexHomeURL
+        let officialClaudeUserData = officialClaudeUserDataURL
+        let officialClaudeCodeHome = officialClaudeCodeHomeURL
+        chatChangeMonitorTask?.cancel()
+        chatChangeMonitorTask = Task { [weak self] in
+            var pendingToken: String?
+            var matchingPolls = 0
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    return
+                }
+                let worker = Task.detached(priority: .background) {
+                    switch selection {
+                    case let .profile(id):
+                        guard let profile = profiles.first(where: { $0.id == id }) else {
+                            return ""
+                        }
+                        return scanner.changeToken(profile: profile)
+                    case .official(.codex):
+                        return scanner.officialCodexChangeToken(codexHomeURL: officialHome)
+                    case .official(.claude):
+                        return scanner.officialClaudeChangeToken(
+                            claudeHomeURL: officialClaudeUserData,
+                            claudeCodeHomeURL: officialClaudeCodeHome
+                        )
+                    case nil:
+                        return ""
+                    }
+                }
+                let token = await withTaskCancellationHandler {
+                    await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                guard
+                    !Task.isCancelled,
+                    let self,
+                    self.chatGeneration == generation,
+                    self.sidebarSelection == selection
+                else {
+                    return
+                }
+                if token == initialToken {
+                    pendingToken = nil
+                    matchingPolls = 0
+                } else if token == pendingToken {
+                    matchingPolls += 1
+                } else {
+                    pendingToken = token
+                    matchingPolls = 1
+                }
+                if matchingPolls >= 2 {
+                    refreshChats()
+                    return
+                }
+            }
+        }
+    }
+
+    func restorePreferences() {
+        preferencesStore.restoreDefaults()
+        preferences = .defaults
+    }
+
+    func shortcutExists(for profile: CodexProfile) -> Bool {
+        installedShortcutProfileIDs.contains(profile.id)
+    }
+
+    private func present(_ error: Error) {
+        errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    private func beginStoreMutationIfAvailable() -> Bool {
+        guard !storeMutationInProgress, busyProfileIDs.isEmpty else {
+            errorMessage = "Another profile change is still in progress."
+            return false
+        }
+        storeMutationInProgress = true
+        return true
+    }
+
+    private func startInstanceMonitoring() {
+        instanceMonitorTask?.cancel()
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceNotificationTasks.forEach { $0.cancel() }
+        workspaceNotificationTasks.removeAll()
+        for name in [
+            NSWorkspace.didLaunchApplicationNotification,
+            NSWorkspace.didTerminateApplicationNotification
+        ] {
+            workspaceNotificationTasks.append(
+                Task { [weak self] in
+                    for await _ in center.notifications(named: name) {
+                        guard !Task.isCancelled else { return }
+                        await self?.refreshInstanceStatuses()
+                    }
+                }
+            )
+        }
+        instanceMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard self != nil else { return }
+                await self?.refreshInstanceStatuses()
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func configureProfileActivityRefresh() {
+        profileActivityRefreshTask?.cancel()
+        guard allowsAutomaticRefresh, preferences.refreshProfileActivity else { return }
+        let interval = max(1, preferences.refreshIntervalMinutes)
+        profileActivityRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(interval * 60))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, let self else { return }
+                self.refreshStats()
+                if self.detailTab == .chats {
+                    self.refreshChats()
+                }
+            }
+        }
+    }
+
+    private func refreshInstanceStatuses() async {
+        let profileSnapshot = profiles
+        let selectedApps = appURLs
+        let controller = instanceController
+        async let profileStatuses = try? controller.statuses(
+            for: profileSnapshot,
+            appURLs: selectedApps
+        )
+        let stockStatuses = await withTaskGroup(
+            of: (DesktopProduct, CodexInstanceStatus?).self,
+            returning: [DesktopProduct: CodexInstanceStatus].self
+        ) { group in
+            for product in DesktopProduct.allCases {
+                let appURL = selectedApps[product]
+                    ?? DesktopAppRegistry.descriptor(for: product).defaultAppURL
+                group.addTask {
+                    let status = try? await controller.stockStatus(
+                        product: product,
+                        appURL: appURL
+                    )
+                    return (product, status)
+                }
+            }
+            var collected = stockInstanceStatuses
+            for await (product, status) in group {
+                if let status {
+                    collected[product] = status
+                }
+            }
+            return collected
+        }
+        let statuses = await profileStatuses
+        guard !Task.isCancelled else { return }
+        if let statuses, profileInstanceStatuses != statuses {
+            profileInstanceStatuses = statuses
+        }
+        if stockInstanceStatuses != stockStatuses {
+            stockInstanceStatuses = stockStatuses
+        }
+    }
+
+    private func cancelRefreshes() {
+        statsGeneration += 1
+        rateLimitGeneration += 1
+        statsRefreshTask?.cancel()
+        rateLimitRefreshTask?.cancel()
+        statsRefreshTask = nil
+        rateLimitRefreshTask = nil
+    }
+
+    private func cancelChatWork() {
+        chatGeneration += 1
+        chatTranscriptGeneration += 1
+        chatRefreshTask?.cancel()
+        chatTranscriptTask?.cancel()
+        chatChangeMonitorTask?.cancel()
+        chatRefreshTask = nil
+        chatTranscriptTask = nil
+        chatChangeMonitorTask = nil
+    }
+
+    nonisolated private static func validatedAppSelections(
+        storedPaths: [DesktopProduct: String?]
+    ) -> (urls: [DesktopProduct: URL], errorMessages: [String]) {
+        let codexSelection = validatedCodexAppSelection(
+            storedPath: storedPaths[.codex] ?? nil
+        )
+        let claudeFallback = DesktopAppRegistry.claude.defaultAppURL
+        let storedClaudePath = storedPaths[.claude] ?? nil
+        let claudeCandidate = storedClaudePath.map(URL.init(fileURLWithPath:))
+            ?? claudeFallback
+        var messages = codexSelection.errorMessage.map { [$0] } ?? []
+        let claudeURL: URL
+        do {
+            try OfficialDesktopAppValidator().validateApp(
+                at: claudeCandidate,
+                product: .claude
+            )
+            try ClaudeDesktopContractProbe().validate(appURL: claudeCandidate)
+            claudeURL = claudeCandidate
+        } catch {
+            claudeURL = claudeFallback
+            if storedClaudePath != nil {
+                messages.append(
+                    "The saved Claude.app was rejected. Select a signed, supported Claude Desktop build before launching a Claude profile."
+                )
+            }
+        }
+        return (
+            [.codex: codexSelection.url, .claude: claudeURL],
+            messages
+        )
+    }
+
+    nonisolated private static func validatedCodexAppSelection(
+        storedPath: String?
+    ) -> (url: URL, errorMessage: String?) {
+        let fallback = CodexAppLocator.defaultCodexAppURL()
+            ?? URL(fileURLWithPath: "/Applications/Codex.app")
+        let candidate = storedPath.map { URL(fileURLWithPath: $0) } ?? fallback
+
+        do {
+            try OfficialCodexAppValidator().validateCodexApp(at: candidate)
+            return (candidate, nil)
+        } catch {
+            guard candidate != fallback else {
+                return (
+                    fallback,
+                    "AgentDock will not run bundled Codex tools until a valid official Codex.app is selected: \(error.localizedDescription)"
+                )
+            }
+            do {
+                try OfficialCodexAppValidator().validateCodexApp(at: fallback)
+                return (
+                    fallback,
+                    "The saved Codex.app was rejected, so AgentDock returned to /Applications/Codex.app."
+                )
+            } catch {
+                return (
+                    fallback,
+                    "No valid official Codex.app is selected. Choose the signed app before launching a profile."
+                )
+            }
+        }
+    }
+}
+
+private enum CodexerModelError: LocalizedError {
+    case storeUnavailable
+
+    var errorDescription: String? {
+        "Profile storage is unavailable. Resolve the profile metadata error and relaunch AgentDock."
+    }
+}
+
+extension Color {
+    init(hex: String) {
+        let clean = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let value = Int(clean, radix: 16) ?? 0x2563EB
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    var hexString: String {
+        let nsColor = NSColor(self).usingColorSpace(.sRGB) ?? .systemBlue
+        let red = Int(round(nsColor.redComponent * 255))
+        let green = Int(round(nsColor.greenComponent * 255))
+        let blue = Int(round(nsColor.blueComponent * 255))
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+}

@@ -1,0 +1,242 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example, 1.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build macOS app
+    runs-on: macos-26
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Validate release version
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$MANUAL_VERSION"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must use MAJOR.MINOR.PATCH format." >&2
+            exit 1
+          fi
+
+          echo "AGENTDOCK_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Run tests
+        run: swift test
+
+      - name: Prepare Developer ID signing and notarization
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          DEVELOPER_ID_CERTIFICATE_PEM_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PEM_BASE64 }}
+          DEVELOPER_ID_PRIVATE_KEY_PEM_BASE64: ${{ secrets.DEVELOPER_ID_PRIVATE_KEY_PEM_BASE64 }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          required=(
+            DEVELOPER_ID_CERTIFICATE_PEM_BASE64
+            DEVELOPER_ID_PRIVATE_KEY_PEM_BASE64
+            APPLE_NOTARY_KEY_P8_BASE64
+            APPLE_NOTARY_KEY_ID
+            APPLE_NOTARY_ISSUER_ID
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required release secret: $name" >&2
+              exit 1
+            fi
+          done
+
+          signing_keychain="$RUNNER_TEMP/agentdock-signing.keychain-db"
+          signing_password="$(/usr/bin/uuidgen)$(/usr/bin/uuidgen)"
+          certificate_path="$RUNNER_TEMP/developer-id.pem"
+          private_key_path="$RUNNER_TEMP/developer-id.key"
+          notary_key_path="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+
+          printf '%s' "$DEVELOPER_ID_CERTIFICATE_PEM_BASE64" | /usr/bin/base64 -D > "$certificate_path"
+          printf '%s' "$DEVELOPER_ID_PRIVATE_KEY_PEM_BASE64" | /usr/bin/base64 -D > "$private_key_path"
+          printf '%s' "$APPLE_NOTARY_KEY_P8_BASE64" | /usr/bin/base64 -D > "$notary_key_path"
+          chmod 600 "$certificate_path" "$private_key_path" "$notary_key_path"
+
+          /usr/bin/security create-keychain -p "$signing_password" "$signing_keychain"
+          /usr/bin/security unlock-keychain -p "$signing_password" "$signing_keychain"
+          /usr/bin/security set-keychain-settings -lut 3600 "$signing_keychain"
+          /usr/bin/security list-keychains -d user -s "$signing_keychain"
+          /usr/bin/security default-keychain -d user -s "$signing_keychain"
+          /usr/bin/security import "$certificate_path" -k "$signing_keychain" -T /usr/bin/codesign
+          /usr/bin/security import "$private_key_path" -k "$signing_keychain" -T /usr/bin/codesign
+          /usr/bin/security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$signing_password" \
+            "$signing_keychain"
+
+          signing_identity="$(
+            /usr/bin/security find-identity -v -p codesigning "$signing_keychain" \
+              | /usr/bin/sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' \
+              | /usr/bin/head -n 1
+          )"
+          if [[ -z "$signing_identity" ]]; then
+            echo "The imported keychain does not contain a Developer ID Application identity." >&2
+            exit 1
+          fi
+
+          echo "AGENTDOCK_SIGNING_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+          echo "AGENTDOCK_SIGNING_KEYCHAIN=$signing_keychain" >> "$GITHUB_ENV"
+          echo "AGENTDOCK_NOTARY_KEY_PATH=$notary_key_path" >> "$GITHUB_ENV"
+          echo "AGENTDOCK_NOTARY_KEY_ID=$APPLE_NOTARY_KEY_ID" >> "$GITHUB_ENV"
+          echo "AGENTDOCK_NOTARY_ISSUER_ID=$APPLE_NOTARY_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Build app bundle
+        run: ./script/build_app.sh
+
+      - name: Package app
+        run: ./script/package_app.sh
+
+      - name: Verify notarized release artifacts
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        run: |
+          release_name="AgentDock-$AGENTDOCK_VERSION"
+          app="dist/$release_name/AgentDock.app"
+          zip="dist/$release_name.zip"
+          dmg="dist/$release_name.dmg"
+
+          test -d "$app"
+          test -f "$zip"
+          test -f "$dmg"
+          test "$(
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+              "$app/Contents/Info.plist"
+          )" = "$AGENTDOCK_VERSION"
+
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
+          /usr/bin/codesign -dv --verbose=4 "$app" 2>&1 \
+            | /usr/bin/grep -q '^Authority=Developer ID Application:'
+          /usr/bin/codesign -dv --verbose=4 "$app" 2>&1 \
+            | /usr/bin/grep -q 'flags=.*runtime'
+          /usr/bin/xcrun stapler validate "$app"
+          /usr/sbin/spctl --assess --type execute --verbose=4 "$app"
+
+          /usr/bin/codesign --verify --strict --verbose=2 "$dmg"
+          /usr/bin/xcrun stapler validate "$dmg"
+          /usr/sbin/spctl \
+            --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=4 \
+            "$dmg"
+          /usr/bin/hdiutil verify "$dmg"
+
+          if /usr/bin/unzip -Z1 "$zip" \
+            | /usr/bin/grep -Eq '/\._|/\.__|/\.DS_Store|/\.fseventsd/'; then
+            echo "ZIP contains filesystem metadata sidecars." >&2
+            exit 1
+          fi
+
+          privacy_mount="$(/usr/bin/mktemp -d "$RUNNER_TEMP/agentdock-dmg.XXXXXX")"
+          cleanup_privacy_mount() {
+            /usr/bin/hdiutil detach "$privacy_mount" -quiet >/dev/null 2>&1 || true
+            /bin/rmdir "$privacy_mount" >/dev/null 2>&1 || true
+          }
+          trap cleanup_privacy_mount EXIT
+
+          /usr/bin/hdiutil attach "$dmg" \
+            -readonly \
+            -nobrowse \
+            -noautoopen \
+            -mountpoint "$privacy_mount" >/dev/null
+
+          leaked_path=""
+          while IFS= read -r -d '' candidate; do
+            if /usr/bin/strings -a "$candidate" \
+              | /usr/bin/grep -Eq '/Users/|/private/var/|/var/folders/|runner/work'; then
+              leaked_path="${candidate#"$privacy_mount"/}"
+              break
+            fi
+          done < <(/usr/bin/find "$privacy_mount" -type f -print0)
+
+          cleanup_privacy_mount
+          trap - EXIT
+          if [[ -n "$leaked_path" ]]; then
+            echo "DMG contains a build-machine path in $leaked_path." >&2
+            exit 1
+          fi
+
+          /usr/bin/shasum -a 256 "$zip" "$dmg" > "dist/$release_name.sha256"
+
+      - name: Clean release credentials
+        if: always() && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch')
+        run: |
+          if [[ -n "${AGENTDOCK_SIGNING_KEYCHAIN:-}" ]]; then
+            /usr/bin/security delete-keychain "$AGENTDOCK_SIGNING_KEYCHAIN" || true
+          fi
+          rm -f \
+            "$RUNNER_TEMP/developer-id.pem" \
+            "$RUNNER_TEMP/developer-id.key" \
+            "$RUNNER_TEMP"/AuthKey_*.p8
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: AgentDock-${{ github.run_id }}
+          path: |
+            dist/AgentDock-*.zip
+            dist/AgentDock-*.dmg
+            dist/AgentDock-*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: AgentDock-${{ github.run_id }}
+          path: dist
+
+      - name: Verify release checksums
+        run: sha256sum --check dist/AgentDock-*.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            dist/AgentDock-*.zip
+            dist/AgentDock-*.dmg
+            dist/AgentDock-*.sha256
+          generate_release_notes: true
+          make_latest: true
