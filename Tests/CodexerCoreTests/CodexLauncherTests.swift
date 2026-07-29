@@ -101,8 +101,63 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertEqual(outcome, .launched(processID: 741))
         let launchedConfigurations = await launcher.configurations()
         XCTAssertEqual(launchedConfigurations, [configuration(for: profile)])
+        XCTAssertEqual(lifecycle.focusedProcessIDs, [741])
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.codexHomePath.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.electronUserDataPath.path))
+    }
+
+    func testOpenStopsFreshInstanceThatDoesNotPresentAWindow() async throws {
+        let profile = makeProfile(slug: "windowless")
+        try prepareIsolationLayout(for: profile)
+        let lifecycle = WindowlessLifecycleController(processID: 742)
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
+            workspaceLauncher: RecordingWorkspaceLauncher(processID: 742),
+            lifecycleController: lifecycle,
+            launchValidationTimeout: .milliseconds(1)
+        )
+
+        do {
+            _ = try await controller.open(
+                profile: profile,
+                codexAppURL: configuration(for: profile).codexAppURL
+            )
+            XCTFail("Expected window presentation failure")
+        } catch {
+            XCTAssertEqual(
+                error as? CodexLauncherError,
+                .launchedProcessDidNotPresentWindow(742)
+            )
+        }
+        XCTAssertEqual(lifecycle.presentationRequests, [742])
+        XCTAssertEqual(lifecycle.terminatedProcessIDs, [742])
+    }
+
+    func testCancellingWindowPresentationStopsFreshInstance() async throws {
+        let profile = makeProfile(slug: "cancelled-window")
+        try prepareIsolationLayout(for: profile)
+        let lifecycle = WindowlessLifecycleController(processID: 743)
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
+            workspaceLauncher: RecordingWorkspaceLauncher(processID: 743),
+            lifecycleController: lifecycle,
+            launchValidationTimeout: .seconds(2)
+        )
+        let codexAppURL = configuration(for: profile).codexAppURL
+        let task = Task {
+            try await controller.open(profile: profile, codexAppURL: codexAppURL)
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {}
+        XCTAssertEqual(lifecycle.presentationRequests, [743])
+        XCTAssertEqual(lifecycle.terminatedProcessIDs, [743])
     }
 
     func testOpenRejectsUnverifiedLaunchedProcess() async throws {
@@ -137,8 +192,9 @@ final class CodexLauncherTests: XCTestCase {
             lifecycleController: lifecycle,
             launchValidationTimeout: .seconds(2)
         )
+        let codexAppURL = configuration(for: profile).codexAppURL
         let task = Task {
-            try await controller.open(profile: profile, codexAppURL: configuration(for: profile).codexAppURL)
+            try await controller.open(profile: profile, codexAppURL: codexAppURL)
         }
         try await Task.sleep(for: .milliseconds(20))
         task.cancel()
@@ -874,6 +930,47 @@ private final class RejectingLaunchedProcessController: CodexApplicationLifecycl
         configuration _: IsolatedCodexLaunchConfiguration
     ) {
         invalidatedProcessIDs.append(processID)
+    }
+}
+
+private final class WindowlessLifecycleController: CodexApplicationLifecycleControlling, @unchecked Sendable {
+    let processID: Int32
+    private(set) var presentationRequests: [Int32] = []
+    private(set) var terminatedProcessIDs: [Int32] = []
+
+    init(processID: Int32) {
+        self.processID = processID
+    }
+
+    func focus(
+        processID _: Int32,
+        configuration _: IsolatedCodexLaunchConfiguration
+    ) -> Bool {
+        true
+    }
+
+    func requestPresentation(
+        processID: Int32,
+        configuration _: IsolatedCodexLaunchConfiguration
+    ) -> Bool {
+        presentationRequests.append(processID)
+        return true
+    }
+
+    func isPresentingWindow(processID _: Int32) -> Bool {
+        false
+    }
+
+    func terminate(
+        processID: Int32,
+        configuration _: IsolatedCodexLaunchConfiguration
+    ) -> Bool {
+        terminatedProcessIDs.append(processID)
+        return true
+    }
+
+    func isRunning(processID: Int32) -> Bool {
+        processID == self.processID
     }
 }
 

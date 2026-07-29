@@ -55,7 +55,7 @@ struct ChatsView: View {
             }
         }
         .background(chatBackground)
-        .onChange(of: filteredSessions.map(\.id)) { visibleIDs in
+        .onChange(of: filteredSessions.map(\.id)) { _, visibleIDs in
             guard
                 let replacementID = ChatSelectionResolver.replacementID(
                     currentID: model.selectedChatID,

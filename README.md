@@ -42,9 +42,9 @@ and can have its own Dock-pinnable shortcut.
 
 ## Requirements
 
-- An Apple silicon Mac running macOS 13 or newer.
+- An Apple silicon Mac running macOS 26 or newer.
 - The official Codex app, the official Claude app, or both.
-- Swift 5.9 or newer only when building from source.
+- Swift 6.2 or newer only when building from source.
 
 AgentDock does not redistribute or modify either provider app. If an app is not
 installed in `/Applications`, select its signed `.app` bundle in AgentDock

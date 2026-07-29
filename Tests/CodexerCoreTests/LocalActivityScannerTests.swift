@@ -60,6 +60,7 @@ final class LocalActivityScannerTests: XCTestCase {
     func testCancellationIsPropagated() async throws {
         try createLogsDatabase(rowCount: 1)
         try createStateDatabase()
+        let root = try XCTUnwrap(root)
 
         let task = Task {
             try Task.checkCancellation()

@@ -1,4 +1,3 @@
-@preconcurrency import MarkdownUI
 import Foundation
 import Streamdown
 import SwiftUI
@@ -103,8 +102,7 @@ public actor StreamdownRenderActor {
                 return .markdown(
                     StreamdownMarkdownRenderBlock(
                         id: blockID,
-                        source: source,
-                        content: ParsedMarkdownContent(value: MarkdownContent(source))
+                        source: Self.inertMarkdownSource(source)
                     )
                 )
             case let .code(language, code, startLine, isIncomplete):
@@ -141,7 +139,7 @@ public actor StreamdownRenderActor {
     ) -> Bool {
         switch (renderedBlock, parsedBlock) {
         case let (.markdown(rendered), .markdown(source)):
-            return rendered.source == source
+            return rendered.source == inertMarkdownSource(source)
         case let (.code(rendered), .code(language, code, startLine, isIncomplete)):
             return rendered.language == language
                 && rendered.code == code
@@ -415,5 +413,9 @@ public actor StreamdownRenderActor {
         let emphasisBonus = trimmed.contains("**") || trimmed.contains("_") || trimmed.contains("`") ? 2 : 0
         let linkBonus = trimmed.contains("](") ? 4 : 0
         return CGFloat(cappedLength + emphasisBonus + linkBonus)
+    }
+
+    private static func inertMarkdownSource(_ source: String) -> String {
+        source.replacingOccurrences(of: "<", with: "&lt;")
     }
 }

@@ -68,7 +68,10 @@ final class BoundedSubprocessTests: XCTestCase {
         ))
 
         let processID = try XCTUnwrap(
-            Int32(String(contentsOf: pidFile).trimmingCharacters(in: .whitespacesAndNewlines))
+            Int32(
+                String(contentsOf: pidFile, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         )
         XCTAssertEqual(kill(processID, 0), -1)
         XCTAssertEqual(errno, ESRCH)

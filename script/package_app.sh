@@ -55,8 +55,12 @@ require_file "$LICENSE_FILE"
 require_file "$NOTICES_FILE"
 require_dir "$LICENSES_DIR"
 require_file "$LICENSES_DIR/Streamdown-FSL-1.1-MIT.txt"
-require_file "$LICENSES_DIR/MarkdownUI-MIT.txt"
-require_file "$LICENSES_DIR/NetworkImage-MIT.txt"
+require_file "$LICENSES_DIR/MarkdownView-MIT.txt"
+require_file "$LICENSES_DIR/swift-markdown-Apache-2.0.txt"
+require_file "$LICENSES_DIR/swift-markdown-NOTICE.txt"
+require_file "$LICENSES_DIR/Highlightr-MIT.txt"
+require_file "$LICENSES_DIR/highlight.js-BSD-3-Clause.txt"
+require_file "$LICENSES_DIR/RichText-MIT.txt"
 require_file "$LICENSES_DIR/swift-cmark-COPYING.txt"
 
 NOTARY_VALUES_SET=0
@@ -77,7 +81,7 @@ PLIST_MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INF
 
 [[ "$PLIST_BUNDLE_ID" == "dev.euforic.agentdock" ]] || fail "unexpected bundle id: $PLIST_BUNDLE_ID"
 [[ "$PLIST_ICON" == "AppIcon" ]] || fail "unexpected icon file: $PLIST_ICON"
-[[ "$PLIST_MIN_OS" == "13.0" ]] || fail "unexpected minimum macOS version: $PLIST_MIN_OS"
+[[ "$PLIST_MIN_OS" == "26.0" ]] || fail "unexpected minimum macOS version: $PLIST_MIN_OS"
 
 file "$APP_BINARY" | grep -q "Mach-O 64-bit executable arm64" || fail "$APP_BINARY is not an arm64 executable"
 file "$HELPER_BINARY" | grep -q "Mach-O 64-bit executable arm64" || fail "$HELPER_BINARY is not an arm64 executable"

@@ -1,5 +1,5 @@
 import SwiftUI
-@preconcurrency import MarkdownUI
+import MarkdownView
 import Streamdown
 
 #if canImport(UIKit)
@@ -7,22 +7,6 @@ import UIKit
 #elseif canImport(AppKit)
 import AppKit
 #endif
-
-// MARK: - MarkdownUI Theme Extension
-
-extension Theme {
-    @MainActor static func streamdownHighlighted(theme: StreamdownTheme) -> Theme {
-        .gitHub.text {
-            ForegroundColor(.primary)
-        }
-        .codeBlock { configuration in
-            StreamdownCodeBlockContent(
-                language: configuration.language,
-                code: configuration.content
-            )
-        }
-    }
-}
 
 // MARK: - StreamdownView
 
@@ -187,9 +171,15 @@ public struct StreamdownView: View {
     }
 
     private func markdownBlock(_ block: StreamdownMarkdownRenderBlock) -> some View {
-        Markdown(block.content.value)
-            .markdownTheme(.streamdownHighlighted(theme: theme))
+        MarkdownView(block.source)
+            .foregroundStyle(theme.colors.foreground)
             .textSelection(.enabled)
+            .markdownElementRenderer(
+                .image(BlockedRemoteMarkdownImageRenderer(), urlScheme: "http")
+            )
+            .markdownElementRenderer(
+                .image(BlockedRemoteMarkdownImageRenderer(), urlScheme: "https")
+            )
             .environment(\.openURL, OpenURLAction { url in
                 systemOpenHandler(url)
             })
@@ -293,6 +283,21 @@ public struct StreamdownView: View {
         #elseif canImport(AppKit)
         NSWorkspace.shared.open(url)
         #endif
+    }
+}
+
+private struct BlockedRemoteMarkdownImageRenderer: MarkdownImageRenderer {
+    func makeBody(configuration: Configuration) -> some View {
+        Label(
+            configuration.alternativeText ?? "Remote image blocked",
+            systemImage: "photo.badge.exclamationmark"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(
+            configuration.alternativeText.map { "Remote image blocked: \($0)" }
+                ?? "Remote image blocked"
+        )
     }
 }
 

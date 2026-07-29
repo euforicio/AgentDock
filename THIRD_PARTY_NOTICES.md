@@ -7,8 +7,11 @@ bundles include the complete license texts under
 | Component | Version | License |
 | --- | --- | --- |
 | [Streamdown Swift subset](Vendor/streamdown-swift) | vendored | [Functional Source License 1.1 with future MIT grant](Vendor/streamdown-swift/LICENSE) |
-| [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui) | 2.4.1 | MIT |
-| [NetworkImage](https://github.com/gonzalezreal/NetworkImage) | 6.0.1 | MIT |
+| [MarkdownView](https://github.com/LiYanan2004/MarkdownView) | 3.0.0 | MIT |
+| [swift-markdown](https://github.com/swiftlang/swift-markdown) | 0.8.0 | Apache License 2.0 with Runtime Library Exception |
+| [Highlightr](https://github.com/raspu/Highlightr) | 2.3.0 | MIT |
+| [highlight.js](https://github.com/highlightjs/highlight.js) | 11.11.1 | BSD 3-Clause |
+| [RichText](https://github.com/LiYanan2004/RichText) | 1.0.0 | MIT |
 | [swift-cmark](https://github.com/swiftlang/swift-cmark) | 0.8.0 | BSD-style and embedded component notices |
 
 Dependency versions are pinned in [Package.resolved](Package.resolved). This

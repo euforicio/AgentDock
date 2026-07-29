@@ -1,6 +1,7 @@
 import StreamdownUI
 import XCTest
 
+@MainActor
 final class TranscriptMarkupTests: XCTestCase {
     func testConversationMarkdownProducesNativeBlockKinds() {
         let markdown = """

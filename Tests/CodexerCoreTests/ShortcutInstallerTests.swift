@@ -41,6 +41,7 @@ final class ShortcutInstallerTests: XCTestCase {
         XCTAssertEqual(config.profileID, profile.id)
         XCTAssertEqual(config.profileSlug, profile.slug)
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "AgentDockShortcutLauncher")
+        XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "26.0")
         XCTAssertEqual(
             plist["CFBundleIdentifier"] as? String,
             "dev.euforic.agentdock.profile.codex.work-account"

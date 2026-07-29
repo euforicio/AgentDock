@@ -2494,8 +2494,13 @@ public struct LocalChatScanner: @unchecked Sendable {
 
     private static func date(_ raw: Any?) -> Date? {
         guard let value = raw as? String else { return nil }
-        return ISO8601DateFormatter.agentDockFractional.date(from: value)
-            ?? ISO8601DateFormatter.agentDock.date(from: value)
+        if let date = try? Date(
+            value,
+            strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+        ) {
+            return date
+        }
+        return try? Date(value, strategy: Date.ISO8601FormatStyle())
     }
 
     private static func claudeDate(_ raw: Any?) -> Date? {
@@ -2749,18 +2754,4 @@ public struct LocalChatScanner: @unchecked Sendable {
             ($0 ^ UInt64($1)) &* 1_099_511_628_211
         }
     }
-}
-
-private extension ISO8601DateFormatter {
-    static let agentDock: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    static let agentDockFractional: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
 }

@@ -3,8 +3,8 @@
 ## Prerequisites
 
 - Apple silicon Mac
-- macOS 13 or newer
-- Swift 5.9 or newer
+- macOS 26 or newer
+- Swift 6.2 or newer
 - Xcode command-line tools
 
 The official provider apps are optional for normal tests. Installed-app and

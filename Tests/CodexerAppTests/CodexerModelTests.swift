@@ -5,16 +5,12 @@ import CodexerCore
 
 @MainActor
 final class CodexerModelTests: XCTestCase {
-    private var root: URL!
+    private let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodexerModelTests-\(UUID().uuidString)", isDirectory: true)
+        .standardizedFileURL
+        .resolvingSymlinksInPath()
 
-    override func setUp() {
-        root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CodexerModelTests-\(UUID().uuidString)", isDirectory: true)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-    }
-
-    override func tearDown() {
+    nonisolated override func tearDown() {
         try? FileManager.default.removeItem(at: root)
     }
 

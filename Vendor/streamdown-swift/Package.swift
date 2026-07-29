@@ -1,16 +1,20 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 
 import PackageDescription
 
 let package = Package(
     name: "Streamdown",
-    platforms: [.iOS(.v17), .macOS(.v13)],
+    platforms: [.iOS(.v26), .macOS(.v26)],
     products: [
         .library(name: "Streamdown", targets: ["Streamdown"]),
         .library(name: "StreamdownUI", targets: ["StreamdownUI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.4.1"),
+        .package(
+            url: "https://github.com/LiYanan2004/MarkdownView.git",
+            from: "3.0.0",
+            traits: []
+        ),
     ],
     targets: [
         .target(name: "Streamdown"),
@@ -18,7 +22,7 @@ let package = Package(
             name: "StreamdownUI",
             dependencies: [
                 "Streamdown",
-                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+                .product(name: "MarkdownView", package: "MarkdownView"),
             ]
         ),
         .testTarget(

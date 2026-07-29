@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="${AGENTDOCK_APP_NAME:-AgentDock}"
 BUNDLE_ID="${AGENTDOCK_BUNDLE_ID:-dev.euforic.agentdock}"
 PRODUCT_BINARY_NAME="AgentDock"
-MIN_SYSTEM_VERSION="13.0"
+MIN_SYSTEM_VERSION="26.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${AGENTDOCK_DIST_DIR:-$ROOT_DIR/dist}"
@@ -20,7 +20,7 @@ VERSION="${AGENTDOCK_VERSION:-${CODEXER_VERSION:-}}"
 if [[ -z "$VERSION" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
   VERSION="${GITHUB_REF_NAME#v}"
 fi
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.1.1}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "error: AGENTDOCK_VERSION must use MAJOR.MINOR.PATCH format" >&2
   exit 1
@@ -41,8 +41,12 @@ cp "$HELPER_BINARY" "$APP_RESOURCES/AgentDockShortcutLauncher"
 cp "$ROOT_DIR/LICENSE" "$APP_RESOURCES/LICENSE.txt"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md"
 cp "$ROOT_DIR/Vendor/streamdown-swift/LICENSE" "$APP_LICENSES/Streamdown-FSL-1.1-MIT.txt"
-cp "$ROOT_DIR/.build/checkouts/swift-markdown-ui/LICENSE" "$APP_LICENSES/MarkdownUI-MIT.txt"
-cp "$ROOT_DIR/.build/checkouts/NetworkImage/LICENSE" "$APP_LICENSES/NetworkImage-MIT.txt"
+cp "$ROOT_DIR/.build/checkouts/MarkdownView/LICENSE" "$APP_LICENSES/MarkdownView-MIT.txt"
+cp "$ROOT_DIR/.build/checkouts/swift-markdown/LICENSE.txt" "$APP_LICENSES/swift-markdown-Apache-2.0.txt"
+cp "$ROOT_DIR/.build/checkouts/swift-markdown/NOTICE.txt" "$APP_LICENSES/swift-markdown-NOTICE.txt"
+cp "$ROOT_DIR/.build/checkouts/Highlightr/LICENSE" "$APP_LICENSES/Highlightr-MIT.txt"
+cp "$ROOT_DIR/.build/checkouts/Highlightr/src/assets/highlighter/LICENSE" "$APP_LICENSES/highlight.js-BSD-3-Clause.txt"
+cp "$ROOT_DIR/.build/checkouts/RichText/LICENSE" "$APP_LICENSES/RichText-MIT.txt"
 cp "$ROOT_DIR/.build/checkouts/swift-cmark/COPYING" "$APP_LICENSES/swift-cmark-COPYING.txt"
 chmod 0644 "$APP_RESOURCES/LICENSE.txt" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md" "$APP_LICENSES"/*.txt
 if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then

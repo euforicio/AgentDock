@@ -1,15 +1,6 @@
-@preconcurrency import MarkdownUI
 import Foundation
 import Streamdown
 import SwiftUI
-
-struct ParsedMarkdownContent: @unchecked Sendable {
-    let value: MarkdownContent
-
-    var plainText: String {
-        value.renderPlainText()
-    }
-}
 
 struct StreamdownInlineContent: Sendable {
     let attributed: AttributedString
@@ -22,7 +13,6 @@ struct StreamdownInlineContent: Sendable {
 struct StreamdownMarkdownRenderBlock: Identifiable, Sendable {
     let id: String
     let source: String
-    let content: ParsedMarkdownContent
 }
 
 struct StreamdownCodeRenderBlock: Identifiable, Sendable {

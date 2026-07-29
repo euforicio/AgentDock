@@ -398,7 +398,7 @@ public actor ClaudeInstanceController {
         guard let application = NSRunningApplication(processIdentifier: processID) else {
             return false
         }
-        return application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return application.activate(options: [.activateAllWindows])
     }
 
     private func remainingCapturedProcesses(

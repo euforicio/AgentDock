@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Darwin
 import Foundation
 import Security
@@ -344,6 +345,11 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
 
 public protocol CodexApplicationLifecycleControlling: Sendable {
     func focus(processID: Int32, configuration: IsolatedCodexLaunchConfiguration) -> Bool
+    func requestPresentation(
+        processID: Int32,
+        configuration: IsolatedCodexLaunchConfiguration
+    ) -> Bool
+    func isPresentingWindow(processID: Int32) -> Bool
     func terminate(processID: Int32, configuration: IsolatedCodexLaunchConfiguration) -> Bool
     func isRunning(processID: Int32) -> Bool
     func isVerifiedRunning(
@@ -370,6 +376,17 @@ public protocol CodexApplicationLifecycleControlling: Sendable {
 }
 
 public extension CodexApplicationLifecycleControlling {
+    func requestPresentation(
+        processID: Int32,
+        configuration: IsolatedCodexLaunchConfiguration
+    ) -> Bool {
+        focus(processID: processID, configuration: configuration)
+    }
+
+    func isPresentingWindow(processID: Int32) -> Bool {
+        isRunning(processID: processID)
+    }
+
     func isVerifiedRunning(
         processID: Int32,
         configuration _: IsolatedCodexLaunchConfiguration
@@ -421,7 +438,36 @@ public struct SystemCodexApplicationLifecycleController: CodexApplicationLifecyc
             return false
         }
         sendReopenEvent(to: processID)
-        return application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return application.activate(options: [.activateAllWindows])
+    }
+
+    public func requestPresentation(
+        processID: Int32,
+        configuration: IsolatedCodexLaunchConfiguration
+    ) -> Bool {
+        focus(processID: processID, configuration: configuration)
+    }
+
+    public func isPresentingWindow(processID: Int32) -> Bool {
+        guard let windowInfo = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return false
+        }
+
+        return windowInfo.contains { window in
+            guard
+                (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == processID,
+                (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                (window[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 0 > 0,
+                let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+                let frame = CGRect(dictionaryRepresentation: bounds)
+            else {
+                return false
+            }
+            return frame.width > 0 && frame.height > 0
+        }
     }
 
     public func terminate(
@@ -478,7 +524,7 @@ public struct SystemCodexApplicationLifecycleController: CodexApplicationLifecyc
             return false
         }
         sendReopenEvent(to: processID)
-        return application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return application.activate(options: [.activateAllWindows])
     }
 
     public func isVerifiedStockRunning(processID: Int32, codexAppURL: URL) -> Bool {
@@ -824,6 +870,30 @@ public actor CodexInstanceController {
             )
             throw CodexLauncherError.launchedProcessFailedValidation(processID)
         }
+        let didPresentWindow: Bool
+        do {
+            if lifecycleController.requestPresentation(
+                processID: processID,
+                configuration: configuration
+            ) {
+                didPresentWindow = try await waitForPresentedWindow(processID: processID)
+            } else {
+                didPresentWindow = false
+            }
+        } catch {
+            _ = lifecycleController.terminate(
+                processID: processID,
+                configuration: configuration
+            )
+            throw error
+        }
+        guard didPresentWindow else {
+            _ = lifecycleController.terminate(
+                processID: processID,
+                configuration: configuration
+            )
+            throw CodexLauncherError.launchedProcessDidNotPresentWindow(processID)
+        }
         return .launched(processID: processID)
     }
 
@@ -959,6 +1029,20 @@ public actor CodexInstanceController {
         )
     }
 
+    private func waitForPresentedWindow(processID: Int32) async throws -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: launchValidationTimeout)
+        while clock.now < deadline {
+            try Task.checkCancellation()
+            if lifecycleController.isPresentingWindow(processID: processID) {
+                return true
+            }
+            try await clock.sleep(for: .milliseconds(50))
+        }
+        try Task.checkCancellation()
+        return lifecycleController.isPresentingWindow(processID: processID)
+    }
+
     private func remainingProcesses(
         configuration: IsolatedCodexLaunchConfiguration,
         captured: [ProcessIdentity]
@@ -1059,6 +1143,7 @@ public enum CodexLauncherError: Error, LocalizedError, Equatable {
     case processInspectionUnavailable
     case launchDidNotReturnProcess
     case launchedProcessFailedValidation(Int32)
+    case launchedProcessDidNotPresentWindow(Int32)
     case couldNotFocus(Int32)
     case couldNotTerminate(Int32)
     case closeTimedOut([Int32])
@@ -1083,6 +1168,8 @@ public enum CodexLauncherError: Error, LocalizedError, Equatable {
             "macOS did not return the process for the new Codex instance."
         case let .launchedProcessFailedValidation(processID):
             "The launched process \(processID) did not match the signed official app and was stopped."
+        case let .launchedProcessDidNotPresentWindow(processID):
+            "Codex profile process \(processID) launched but did not present a window and was stopped."
         case let .couldNotFocus(processID):
             "Codex profile process \(processID) is running but could not be focused."
         case let .couldNotTerminate(processID):

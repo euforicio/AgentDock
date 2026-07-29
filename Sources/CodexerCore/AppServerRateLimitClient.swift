@@ -20,7 +20,7 @@ public final class AppServerRateLimitClient: @unchecked Sendable {
         self.maximumResponseBytes = maximumResponseBytes
         self.clientVersion = clientVersion
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
-            ?? "0.1.0"
+            ?? "0.1.1"
     }
 
     public func fetchRateLimits(for profile: CodexProfile, codexAppURL: URL) -> ProfileRateLimits {

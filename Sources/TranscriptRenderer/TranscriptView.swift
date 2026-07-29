@@ -122,6 +122,7 @@ private struct TranscriptViewport: View {
     }
 }
 
+@MainActor
 final class TranscriptScrollPreserver: ObservableObject {
     weak var scrollView: NSScrollView?
     private var prependSnapshot: Snapshot?
@@ -233,14 +234,18 @@ private struct TranscriptScrollResolver: NSViewRepresentable {
                 object: scrollView.contentView,
                 queue: .main
             ) { [weak preserver] _ in
-                preserver?.captureBeforePrepend()
+                MainActor.assumeIsolated {
+                    preserver?.captureBeforePrepend()
+                }
             }
             coordinator?.liveScrollObserver = NotificationCenter.default.addObserver(
                 forName: NSScrollView.willStartLiveScrollNotification,
                 object: scrollView,
                 queue: .main
             ) { _ in
-                onUserScroll()
+                MainActor.assumeIsolated {
+                    onUserScroll()
+                }
             }
             coordinator?.keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 let scrollKeys: Set<UInt16> = [49, 115, 116, 119, 121, 125, 126]
@@ -701,7 +706,7 @@ private struct TranscriptTailRevision: Equatable {
 }
 
 private struct TranscriptBottomPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()

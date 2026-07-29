@@ -213,6 +213,7 @@ struct AgentDockEmptyState: View {
     }
 }
 
+@MainActor
 extension ByteCountFormatter {
     static let agentDock: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
