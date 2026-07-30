@@ -8,9 +8,11 @@
    and persisted profile record under a cross-process lock.
 3. The selected launcher validates the official provider bundle and its signing
    identity.
-4. AgentDock starts a new provider instance with the profile-specific local
+4. Before a new Codex launch, AgentDock closes any provider-signed orphan helper
+   whose live executable remains contained by that profile's `CODEX_HOME`.
+5. AgentDock starts a new provider instance with the profile-specific local
    state contract.
-5. Post-launch discovery verifies the returned process before the UI marks the
+6. Post-launch discovery verifies the returned process before the UI marks the
    profile as running.
 
 Failed persistence or validation rolls back partial state where safe. A
@@ -21,10 +23,12 @@ profile is in use.
 
 1. [`DesktopInstanceController`](../Sources/CodexerCore/DesktopInstanceController.swift)
    finds candidates carrying the exact managed profile root.
-2. AgentDock resolves and validates the signed main process.
+2. AgentDock resolves and validates the signed main process and any
+   provider-signed helper executable contained by the selected profile root.
 3. Focus activates only that PID.
 4. Close sends graceful termination only to verified processes for the selected
-   profile and bounds the wait for cleanup.
+   profile, tracks captured descendants by stable process identity, and bounds
+   the wait for cleanup.
 
 The stock provider app and other managed profiles do not match the selected
 profile path.

@@ -91,6 +91,17 @@ public struct SystemProcessTreeSnapshotProvider: ProcessTreeSnapshotProviding {
         guard result == Int32(size) else { return nil }
         return "\(info.pbi_start_tvsec).\(info.pbi_start_tvusec)"
     }
+
+    static func executableURL(for processID: Int32) -> URL? {
+        var path = [CChar](
+            repeating: 0,
+            count: Int(MAXPATHLEN) * 4
+        )
+        let length = proc_pidpath(processID, &path, UInt32(path.count))
+        guard length > 0 else { return nil }
+        let bytes = path.prefix(Int(length)).map { UInt8(bitPattern: $0) }
+        return URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self))
+    }
 }
 
 public protocol ProcessIdentitySignaling: Sendable {

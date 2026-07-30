@@ -248,6 +248,35 @@ public enum CodexInstanceDiscovery {
         in processSnapshot: String,
         configuration: IsolatedCodexLaunchConfiguration
     ) -> [Int32] {
+        let bundledProcessIDs = Set(
+            bundledProfileProcessIDs(
+                in: processSnapshot,
+                configuration: configuration
+            )
+        )
+        let codexHomeExecutablePrefix = canonicalUserDataPath(
+            configuration.codexHomePath
+        ) + "/"
+
+        return processSnapshot.split(whereSeparator: \.isNewline).compactMap { line in
+            let trimmed = line.drop(while: \.isWhitespace)
+            guard let separator = trimmed.firstIndex(where: \.isWhitespace),
+                  let processID = Int32(trimmed[..<separator])
+            else {
+                return nil
+            }
+            let command = String(trimmed[separator...].drop(while: \.isWhitespace))
+            return bundledProcessIDs.contains(processID)
+                || command.hasPrefix(codexHomeExecutablePrefix)
+                ? processID
+                : nil
+        }.sorted()
+    }
+
+    static func bundledProfileProcessIDs(
+        in processSnapshot: String,
+        configuration: IsolatedCodexLaunchConfiguration
+    ) -> [Int32] {
         let profilePath = canonicalUserDataPath(configuration.electronUserDataPath)
         let appBundlePrefix = configuration.codexAppURL
             .standardizedFileURL
@@ -266,11 +295,29 @@ public enum CodexInstanceDiscovery {
                 return nil
             }
             let command = String(trimmed[separator...].drop(while: \.isWhitespace))
-            guard command.hasPrefix(appBundlePrefix) else { return nil }
-            return profileArguments.contains(where: { containsArgument($0, in: command) })
+            return command.hasPrefix(appBundlePrefix)
+                && profileArguments.contains(where: { containsArgument($0, in: command) })
                 ? processID
                 : nil
         }.sorted()
+    }
+
+    static func isExecutable(
+        _ executableURL: URL,
+        containedBy directoryURL: URL
+    ) -> Bool {
+        let executableComponents = executableURL.standardizedFileURL
+            .resolvingSymlinksInPath()
+            .pathComponents
+        let directoryComponents = directoryURL.standardizedFileURL
+            .resolvingSymlinksInPath()
+            .pathComponents
+        guard executableComponents.count > directoryComponents.count else {
+            return false
+        }
+        return zip(directoryComponents, executableComponents).allSatisfy {
+            $0.0 == $0.1
+        }
     }
 
     private static func containsArgument(_ argument: String, in command: String) -> Bool {
@@ -356,11 +403,6 @@ public protocol CodexApplicationLifecycleControlling: Sendable {
         processID: Int32,
         configuration: IsolatedCodexLaunchConfiguration
     ) -> Bool
-    func terminateAuxiliary(
-        processID: Int32,
-        configuration: IsolatedCodexLaunchConfiguration,
-        processSnapshot: String
-    ) -> Bool
     func isVerifiedProfileProcess(
         processID: Int32,
         configuration: IsolatedCodexLaunchConfiguration,
@@ -406,14 +448,6 @@ public extension CodexApplicationLifecycleControlling {
     }
 
     func invalidateUnverifiedStockLaunch(processID _: Int32, codexAppURL _: URL) {}
-
-    func terminateAuxiliary(
-        processID: Int32,
-        configuration: IsolatedCodexLaunchConfiguration,
-        processSnapshot _: String
-    ) -> Bool {
-        terminate(processID: processID, configuration: configuration)
-    }
 
     func isVerifiedProfileProcess(
         processID: Int32,
@@ -536,21 +570,6 @@ public struct SystemCodexApplicationLifecycleController: CodexApplicationLifecyc
         officialMainApplication(processID: processID, codexAppURL: codexAppURL)?.terminate()
     }
 
-    public func terminateAuxiliary(
-        processID: Int32,
-        configuration: IsolatedCodexLaunchConfiguration,
-        processSnapshot: String
-    ) -> Bool {
-        guard isVerifiedProfileProcess(
-            processID: processID,
-            configuration: configuration,
-            processSnapshot: processSnapshot
-        ) else {
-            return kill(processID, 0) != 0 && errno == ESRCH
-        }
-        return kill(processID, SIGTERM) == 0 || errno == ESRCH
-    }
-
     public func isVerifiedProfileProcess(
         processID: Int32,
         configuration: IsolatedCodexLaunchConfiguration,
@@ -563,10 +582,21 @@ public struct SystemCodexApplicationLifecycleController: CodexApplicationLifecyc
         else {
             return false
         }
-        return CodexInstanceDiscovery.profileProcessIDs(
+        if CodexInstanceDiscovery.bundledProfileProcessIDs(
             in: processSnapshot,
             configuration: configuration
-        ).contains(processID)
+        ).contains(processID) {
+            return true
+        }
+        guard let executableURL = SystemProcessTreeSnapshotProvider.executableURL(
+            for: processID
+        ) else {
+            return false
+        }
+        return CodexInstanceDiscovery.isExecutable(
+            executableURL,
+            containedBy: configuration.codexHomeURL
+        )
     }
 
     private func sendReopenEvent(to processID: Int32) {
@@ -694,6 +724,7 @@ public actor CodexInstanceController {
     private let launchValidationTimeout: Duration
     private let processTreeProvider: any ProcessTreeSnapshotProviding
     private let processIdentitySignaler: any ProcessIdentitySignaling
+    private let kernelStartKeyProvider: @Sendable (Int32) -> String?
 
     public init(
         fileManager: FileManager = .default,
@@ -705,7 +736,8 @@ public actor CodexInstanceController {
         closePollInterval: Duration = .milliseconds(100),
         launchValidationTimeout: Duration = .seconds(2),
         processTreeProvider: any ProcessTreeSnapshotProviding = SystemProcessTreeSnapshotProvider(),
-        processIdentitySignaler: (any ProcessIdentitySignaling)? = nil
+        processIdentitySignaler: (any ProcessIdentitySignaling)? = nil,
+        kernelStartKeyProvider: (@Sendable (Int32) -> String?)? = nil
     ) {
         self.fileManager = fileManager
         self.validator = validator
@@ -718,6 +750,9 @@ public actor CodexInstanceController {
         self.processTreeProvider = processTreeProvider
         self.processIdentitySignaler = processIdentitySignaler
             ?? SystemProcessIdentitySignaler(snapshotProvider: processTreeProvider)
+        self.kernelStartKeyProvider = kernelStartKeyProvider ?? {
+            SystemProcessTreeSnapshotProvider.kernelStartKey(for: $0)
+        }
     }
 
     public func status(
@@ -847,6 +882,13 @@ public actor CodexInstanceController {
             return .focused(processID: processID)
         }
 
+        let orphanSnapshot = try processSnapshotProvider.processSnapshot()
+        if !CodexInstanceDiscovery.profileProcessIDs(
+            in: orphanSnapshot,
+            configuration: configuration
+        ).isEmpty {
+            _ = try await closeProcesses(configuration: configuration)
+        }
         try validateMCPConfiguration(configuration)
         try validator.validateCodexApp(at: configuration.codexAppURL)
         let processID = try await workspaceLauncher.launch(configuration: configuration)
@@ -906,31 +948,37 @@ public actor CodexInstanceController {
             for: configuration.codexHomeURL.deletingLastPathComponent()
         )
         defer { withExtendedLifetime(operationLock) {} }
+        return try await closeProcesses(configuration: configuration)
+    }
+
+    private func closeProcesses(
+        configuration: IsolatedCodexLaunchConfiguration
+    ) async throws -> CodexCloseOutcome {
         let snapshot = try processSnapshotProvider.processSnapshot()
         let processIDs = CodexInstanceDiscovery.processIDs(
             in: snapshot,
             configuration: configuration
         )
-        let profileProcessIDs = CodexInstanceDiscovery.profileProcessIDs(
-            in: snapshot,
-            configuration: configuration
-        )
-        guard !profileProcessIDs.isEmpty else { return .alreadyStopped }
         let processTree = try processTreeProvider.processTreeSnapshot()
         let descendants = SystemProcessTreeSnapshotProvider.descendants(
             of: Set(processIDs),
             in: processTree
         )
-        let profileProcessIDSet = Set(profileProcessIDs)
-        let capturedProfileProcesses = processTree.filter {
-            profileProcessIDSet.contains($0.processID) && !processIDs.contains($0.processID)
-        }
-        let capturedProcesses = Array(Set(descendants + capturedProfileProcesses)).map { identity in
+        var capturedProcesses = descendants.map { identity in
             var identity = identity
-            identity.kernelStartKey = SystemProcessTreeSnapshotProvider.kernelStartKey(
-                for: identity.processID
-            )
+            identity.kernelStartKey = kernelStartKeyProvider(identity.processID)
             return identity
+        }
+        capturedProcesses.append(
+            contentsOf: verifiedAuxiliaryProcesses(
+                configuration: configuration,
+                excluding: Set(processIDs),
+                in: processTree
+            )
+        )
+        capturedProcesses = Array(Set(capturedProcesses))
+        guard !processIDs.isEmpty || !capturedProcesses.isEmpty else {
+            return .alreadyStopped
         }
 
         for processID in processIDs {
@@ -941,18 +989,14 @@ public actor CodexInstanceController {
                 throw CodexLauncherError.couldNotTerminate(processID)
             }
         }
-        let auxiliarySnapshot = try processSnapshotProvider.processSnapshot()
-        let auxiliaryProcessIDs = CodexInstanceDiscovery.profileProcessIDs(
-            in: auxiliarySnapshot,
-            configuration: configuration
-        ).filter { !processIDs.contains($0) }
-        for processID in auxiliaryProcessIDs {
-            _ = lifecycleController.terminateAuxiliary(
-                processID: processID,
+        capturedProcesses.append(
+            contentsOf: verifiedAuxiliaryProcesses(
                 configuration: configuration,
-                processSnapshot: auxiliarySnapshot
+                excluding: Set(processIDs),
+                in: try processTreeProvider.processTreeSnapshot()
             )
-        }
+        )
+        capturedProcesses = Array(Set(capturedProcesses))
         try processIdentitySignaler.signal(
             SIGTERM,
             identities: Array(capturedProcesses.reversed())
@@ -988,6 +1032,42 @@ public actor CodexInstanceController {
             throw CodexLauncherError.closeTimedOut(allRemaining)
         }
         return .closed(processIDs: processIDs)
+    }
+
+    private func verifiedAuxiliaryProcesses(
+        configuration: IsolatedCodexLaunchConfiguration,
+        excluding processIDs: Set<Int32>,
+        in processTree: [ProcessIdentity]
+    ) -> [ProcessIdentity] {
+        let processSnapshot = processTree.map {
+            "\($0.processID) \($0.command)"
+        }.joined(separator: "\n")
+        var verifiedStartKeys: [Int32: String] = [:]
+        for processID in CodexInstanceDiscovery.profileProcessIDs(
+            in: processSnapshot,
+            configuration: configuration
+        ) where !processIDs.contains(processID) {
+            guard let startKeyBeforeVerification = kernelStartKeyProvider(processID),
+                  lifecycleController.isVerifiedProfileProcess(
+                      processID: processID,
+                      configuration: configuration,
+                      processSnapshot: processSnapshot
+                  ),
+                  let startKeyAfterVerification = kernelStartKeyProvider(processID),
+                  startKeyBeforeVerification == startKeyAfterVerification
+            else {
+                continue
+            }
+            verifiedStartKeys[processID] = startKeyAfterVerification
+        }
+        return processTree.compactMap { identity in
+            guard let kernelStartKey = verifiedStartKeys[identity.processID] else {
+                return nil
+            }
+            var identity = identity
+            identity.kernelStartKey = kernelStartKey
+            return identity
+        }
     }
 
     public func validateCodexApp(at url: URL) throws {
@@ -1051,15 +1131,26 @@ public actor CodexInstanceController {
         let currentByPID = Dictionary(uniqueKeysWithValues: current.map { ($0.processID, $0) })
         let commandSnapshot = current.map { "\($0.processID) \($0.command)" }
             .joined(separator: "\n")
-        let profileProcessIDs = CodexInstanceDiscovery.profileProcessIDs(
+        let mainProcessIDs = CodexInstanceDiscovery.processIDs(
             in: commandSnapshot,
             configuration: configuration
         )
+        let auxiliaryProcessIDs = CodexInstanceDiscovery.profileProcessIDs(
+            in: commandSnapshot,
+            configuration: configuration
+        ).filter {
+            !mainProcessIDs.contains($0)
+                && lifecycleController.isVerifiedProfileProcess(
+                    processID: $0,
+                    configuration: configuration,
+                    processSnapshot: commandSnapshot
+                )
+        }
         let descendants = captured.filter { identity in
             guard let current = currentByPID[identity.processID] else { return false }
             return current.startKey == identity.startKey && current.command == identity.command
         }
-        return (profileProcessIDs, descendants)
+        return (mainProcessIDs + auxiliaryProcessIDs, descendants)
     }
 
     private func validateIsolationLayout(

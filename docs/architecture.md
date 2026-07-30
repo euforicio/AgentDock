@@ -66,8 +66,11 @@ separates them.
 
 AgentDock maps a managed profile path to an exact signed main-app process.
 Focus and close operations revalidate the bundle, executable, PID, ancestry,
-and profile argument immediately before acting. Stock app discovery is
-separate, so a managed action does not target the normal provider instance.
+and profile argument immediately before acting. Codex close also recognizes
+signed provider helpers whose executable is contained by that profile's
+`CODEX_HOME`, including helpers that no longer carry an Electron profile
+argument. Stock app discovery is separate, so a managed action does not target
+the normal provider instance or another managed profile.
 
 ## Persistence
 
