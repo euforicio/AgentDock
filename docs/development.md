@@ -44,6 +44,9 @@ Installed-app checks:
 AGENTDOCK_LIVE_LIFECYCLE=1 swift test \
   --filter CodexLauncherTests/testLiveProfileCanOpenAndCloseWithoutTouchingStockInstance
 
+AGENTDOCK_LIVE_EXISTING_CODEX_PROFILE=/path/to/active/profile swift test \
+  --filter CodexLauncherTests/testLiveExistingCodexProfileClosesAllOwnedProcessesWithoutTouchingStock
+
 AGENTDOCK_INSTALLED_CLAUDE_TEST=1 swift test \
   --filter ClaudeDesktopTests/testInstalledClaudeSignatureAndStartupContract
 
@@ -51,8 +54,9 @@ AGENTDOCK_CLAUDE_LIVE_LIFECYCLE=1 swift test \
   --filter ClaudeDesktopTests/testLiveClaudeProfileCanOpenAndCloseWithoutTouchingStock
 ```
 
-These checks can open installed provider applications or temporary managed
-profiles. Run them only on a Mac where that interaction is expected.
+These checks can open installed provider applications or terminate the exact
+active managed profile named in the environment. Run them only on a Mac where
+that interaction is expected.
 
 ## Change Expectations
 

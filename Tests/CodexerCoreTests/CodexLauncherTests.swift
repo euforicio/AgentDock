@@ -35,6 +35,86 @@ final class CodexLauncherTests: XCTestCase {
         )
     }
 
+    func testProfileProcessDiscoveryIncludesOnlyExecutablesOwnedBySelectedCodexHome() {
+        let profile = makeProfile(slug: "work")
+        let selectedConfiguration = configuration(for: profile)
+        let selectedHelper = selectedConfiguration.codexHomeURL
+            .appendingPathComponent("computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService")
+            .path
+        let siblingHelper = selectedConfiguration.codexHomeURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("CODEX_HOME-other/computer-use/SkyComputerUseService")
+            .path
+        let otherProfile = makeProfile(slug: "personal")
+        let otherHelper = configuration(for: otherProfile).codexHomeURL
+            .appendingPathComponent("computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService")
+            .path
+        let snapshot = """
+          202 \(selectedConfiguration.appExecutableURL.path) --user-data-dir=\(selectedConfiguration.electronUserDataPath)
+          404 \(selectedHelper)
+          405 \(siblingHelper)
+          406 \(otherHelper)
+        """
+
+        XCTAssertEqual(
+            CodexInstanceDiscovery.profileProcessIDs(in: snapshot, configuration: selectedConfiguration),
+            [202, 404]
+        )
+    }
+
+    func testExecutableContainmentRejectsTraversalSiblingAndSymlinkEscape() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentDock Containment-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let codexHome = root.appendingPathComponent("selected/CODEX_HOME")
+        let siblingHome = root.appendingPathComponent("sibling/CODEX_HOME")
+        let siblingHelper = siblingHome.appendingPathComponent("computer-use/helper")
+        try FileManager.default.createDirectory(
+            at: siblingHelper.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        XCTAssertTrue(
+            FileManager.default.createFile(
+                atPath: siblingHelper.path,
+                contents: Data()
+            )
+        )
+        try FileManager.default.createDirectory(
+            at: codexHome,
+            withIntermediateDirectories: true
+        )
+        let escapedLink = codexHome.appendingPathComponent("linked-helper")
+        try FileManager.default.createSymbolicLink(
+            at: escapedLink,
+            withDestinationURL: siblingHelper
+        )
+
+        XCTAssertTrue(
+            CodexInstanceDiscovery.isExecutable(
+                codexHome.appendingPathComponent("computer-use/helper"),
+                containedBy: codexHome
+            )
+        )
+        XCTAssertFalse(
+            CodexInstanceDiscovery.isExecutable(
+                codexHome.appendingPathComponent("../../sibling/CODEX_HOME/computer-use/helper"),
+                containedBy: codexHome
+            )
+        )
+        XCTAssertFalse(
+            CodexInstanceDiscovery.isExecutable(
+                siblingHelper,
+                containedBy: codexHome
+            )
+        )
+        XCTAssertFalse(
+            CodexInstanceDiscovery.isExecutable(
+                escapedLink,
+                containedBy: codexHome
+            )
+        )
+    }
+
     func testOpenStockFocusesOnlyExistingDefaultInstance() async throws {
         let profile = makeProfile(slug: "work")
         let configuration = configuration(for: profile)
@@ -104,6 +184,34 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertEqual(lifecycle.focusedProcessIDs, [741])
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.codexHomePath.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.electronUserDataPath.path))
+    }
+
+    func testOpenTerminatesVerifiedOrphanedHelperBeforeLaunchingReplacement() async throws {
+        let profile = makeProfile(slug: "orphan-recovery")
+        try prepareIsolationLayout(for: profile)
+        let configuration = configuration(for: profile)
+        let profileOwnedHelper = configuration.codexHomeURL
+            .appendingPathComponent("computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService")
+            .path
+        let snapshot = "224 \(profileOwnedHelper)"
+        let lifecycle = RecordingLifecycleController(running: [224, 741])
+        let launcher = RecordingWorkspaceLauncher(processID: 741)
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: snapshot),
+            workspaceLauncher: launcher,
+            lifecycleController: lifecycle,
+            processTreeProvider: LifecycleBackedTreeProvider(snapshot: snapshot, lifecycle: lifecycle),
+            processIdentitySignaler: LifecycleBackedIdentitySignaler(lifecycle: lifecycle),
+            kernelStartKeyProvider: { "test-\($0)" }
+        )
+
+        let outcome = try await controller.open(configuration: configuration)
+
+        XCTAssertEqual(outcome, .launched(processID: 741))
+        XCTAssertEqual(lifecycle.terminatedProcessIDs, [224])
+        let launchedConfigurations = await launcher.configurations()
+        XCTAssertEqual(launchedConfigurations, [configuration])
     }
 
     func testOpenStopsFreshInstanceThatDoesNotPresentAWindow() async throws {
@@ -480,26 +588,60 @@ final class CodexLauncherTests: XCTestCase {
     func testCloseWaitsForAndTerminatesProfileHelpers() async throws {
         let profile = makeProfile(slug: "helpers")
         let configuration = configuration(for: profile)
-        let helper = configuration.codexAppURL
+        let bundledHelper = configuration.codexAppURL
             .appendingPathComponent("Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper")
+            .path
+        let profileOwnedHelper = configuration.codexHomeURL
+            .appendingPathComponent("computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService")
             .path
         let snapshot = """
           222 \(configuration.appExecutableURL.path) --user-data-dir=\(configuration.electronUserDataPath)
-          223 \(helper) --type=renderer --user-data-dir=\(configuration.electronUserDataPath)
+          223 \(bundledHelper) --type=renderer --user-data-dir=\(configuration.electronUserDataPath)
+          224 \(profileOwnedHelper)
         """
-        let lifecycle = RecordingLifecycleController(running: [222, 223])
+        let lifecycle = RecordingLifecycleController(running: [222, 223, 224])
         let controller = CodexInstanceController(
             validator: AcceptingValidator(),
             processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: snapshot),
             workspaceLauncher: RecordingWorkspaceLauncher(processID: 999),
             lifecycleController: lifecycle,
-            processTreeProvider: LifecycleBackedTreeProvider(snapshot: snapshot, lifecycle: lifecycle)
+            processTreeProvider: LifecycleBackedTreeProvider(snapshot: snapshot, lifecycle: lifecycle),
+            processIdentitySignaler: LifecycleBackedIdentitySignaler(lifecycle: lifecycle),
+            kernelStartKeyProvider: { "test-\($0)" }
         )
 
         let outcome = try await controller.close(profile: profile, codexAppURL: configuration.codexAppURL)
 
         XCTAssertEqual(outcome, .closed(processIDs: [222]))
-        XCTAssertEqual(lifecycle.terminatedProcessIDs, [222, 223])
+        XCTAssertEqual(lifecycle.terminatedProcessIDs.first, 222)
+        XCTAssertEqual(Set(lifecycle.terminatedProcessIDs.dropFirst()), Set([223, 224]))
+    }
+
+    func testCloseTerminatesVerifiedOrphanedProfileHelper() async throws {
+        let profile = makeProfile(slug: "orphan")
+        let configuration = configuration(for: profile)
+        let profileOwnedHelper = configuration.codexHomeURL
+            .appendingPathComponent("computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService")
+            .path
+        let snapshot = "224 \(profileOwnedHelper)"
+        let lifecycle = RecordingLifecycleController(running: [224])
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: snapshot),
+            workspaceLauncher: RecordingWorkspaceLauncher(processID: 999),
+            lifecycleController: lifecycle,
+            processTreeProvider: LifecycleBackedTreeProvider(snapshot: snapshot, lifecycle: lifecycle),
+            processIdentitySignaler: LifecycleBackedIdentitySignaler(lifecycle: lifecycle),
+            kernelStartKeyProvider: { "test-\($0)" }
+        )
+
+        let outcome = try await controller.close(
+            profile: profile,
+            codexAppURL: configuration.codexAppURL
+        )
+
+        XCTAssertEqual(outcome, .closed(processIDs: []))
+        XCTAssertEqual(lifecycle.terminatedProcessIDs, [224])
     }
 
     func testManyProfilesAlwaysHaveDistinctIsolationConfiguration() {
@@ -550,6 +692,29 @@ final class CodexLauncherTests: XCTestCase {
         ])
 
         XCTAssertEqual(recorder.recorded, [.init(processID: 10, signal: SIGTERM)])
+    }
+
+    func testSystemIdentitySignalerRejectsWrongKernelStartKeyForRealProcess() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["10"]
+        try process.run()
+        defer { SubprocessTerminator.terminateAndWait(process) }
+        let snapshotProvider = SystemProcessTreeSnapshotProvider()
+        guard var identity = try snapshotProvider.processTreeSnapshot().first(where: {
+            $0.processID == process.processIdentifier
+        }) else {
+            return XCTFail("Could not inspect the real test process.")
+        }
+        identity.kernelStartKey = "deliberately-wrong"
+
+        try SystemProcessIdentitySignaler(snapshotProvider: snapshotProvider).signal(
+            SIGTERM,
+            identities: [identity]
+        )
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertTrue(process.isRunning)
     }
 
     func testOfficialInstalledCodexSignatureIsAccepted() throws {
@@ -689,6 +854,60 @@ final class CodexLauncherTests: XCTestCase {
                 $0.processID == captured.processID
                     && $0.startKey == captured.startKey
                     && $0.command == captured.command
+            })
+        }
+    }
+
+    func testLiveExistingCodexProfileClosesAllOwnedProcessesWithoutTouchingStock() async throws {
+        guard let profilePath = ProcessInfo.processInfo.environment[
+            "AGENTDOCK_LIVE_EXISTING_CODEX_PROFILE"
+        ] else {
+            throw XCTSkip(
+                "Set AGENTDOCK_LIVE_EXISTING_CODEX_PROFILE to an active managed profile directory."
+            )
+        }
+        let profileDirectory = URL(fileURLWithPath: profilePath, isDirectory: true)
+        let profile = CodexProfile(
+            name: "Live Existing Profile",
+            slug: profileDirectory.lastPathComponent,
+            profileDirectory: profileDirectory,
+            shortcutDirectory: FileManager.default.temporaryDirectory
+        )
+        let appURL = URL(fileURLWithPath: "/Applications/Codex.app")
+        let controller = CodexInstanceController()
+        let running = try await controller.status(for: profile, codexAppURL: appURL)
+        guard running.isRunning else {
+            return XCTFail("The selected live profile is not running.")
+        }
+        let stockBefore = try await controller.stockStatus(codexAppURL: appURL)
+        let processTreeProvider = SystemProcessTreeSnapshotProvider()
+        let before = try processTreeProvider.processTreeSnapshot()
+        let selectedHelpers = before.filter {
+            $0.command.contains(profileDirectory.path)
+                && $0.command.contains("SkyComputerUseService")
+        }
+        XCTAssertFalse(selectedHelpers.isEmpty)
+        let unrelatedComputerUseHelpers = before.filter {
+            !$0.command.contains(profileDirectory.path)
+                && $0.command.contains("SkyComputerUseService")
+        }
+
+        let outcome = try await controller.close(profile: profile, codexAppURL: appURL)
+        let stopped = try await controller.status(for: profile, codexAppURL: appURL)
+        let stockAfter = try await controller.stockStatus(codexAppURL: appURL)
+
+        XCTAssertEqual(outcome, .closed(processIDs: running.processIDs))
+        XCTAssertFalse(stopped.isRunning)
+        XCTAssertEqual(stockAfter, stockBefore)
+        let remaining = try processTreeProvider.processTreeSnapshot()
+        XCTAssertFalse(remaining.contains {
+            $0.command.contains(profileDirectory.path)
+        })
+        for unrelated in unrelatedComputerUseHelpers {
+            XCTAssertTrue(remaining.contains {
+                $0.processID == unrelated.processID
+                    && $0.startKey == unrelated.startKey
+                    && $0.command == unrelated.command
             })
         }
     }
@@ -855,12 +1074,31 @@ private final class RecordingLifecycleController: CodexApplicationLifecycleContr
         lock.withLock { runningProcessIDs.contains(processID) }
     }
 
+    func markStopped(processID: Int32) {
+        lock.withLock {
+            if runningProcessIDs.remove(processID) != nil {
+                terminatedProcessIDs.append(processID)
+            }
+        }
+    }
+
     func isVerifiedProfileProcess(
         processID: Int32,
         configuration _: IsolatedCodexLaunchConfiguration,
         processSnapshot _: String
     ) -> Bool {
         verifiesProfileProcesses && isRunning(processID: processID)
+    }
+}
+
+private struct LifecycleBackedIdentitySignaler: ProcessIdentitySignaling {
+    var lifecycle: RecordingLifecycleController
+
+    func signal(_ signal: Int32, identities: [ProcessIdentity]) throws {
+        guard signal == SIGTERM || signal == SIGKILL else { return }
+        for identity in identities {
+            lifecycle.markStopped(processID: identity.processID)
+        }
     }
 }
 
