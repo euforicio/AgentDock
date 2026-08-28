@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var model: CodexerModel
     @State private var profileSearch = ""
+    @State private var showsSettings = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -91,22 +92,28 @@ struct ContentView: View {
             HStack {
                 Button(action: openSettings) {
                     Label("Settings", systemImage: "gearshape")
+                        .padding(.horizontal, 8)
+                        .frame(height: 32)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            showsSettings ? AgentDockPalette.blue.opacity(0.72) : .clear,
+                            in: .rect(cornerRadius: 7)
+                        )
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(",", modifiers: .command)
-                .accessibilityHint("Opens AgentDock settings")
+                .accessibilityHint("Shows AgentDock settings")
 
                 Button {
-                    model.restoreProfile()
+                    refreshContent()
                 } label: {
-                    Image(systemName: "arrow.counterclockwise")
+                    Image(systemName: "arrow.clockwise")
                         .frame(width: 28, height: 28)
                         .background(.white.opacity(0.035), in: .circle)
                 }
                 .buttonStyle(.plain)
-                .help("Restore a preserved profile")
-                .accessibilityLabel("Restore Profile")
+                .help("Refresh profile activity and chats")
+                .accessibilityLabel("Refresh")
             }
             .foregroundStyle(.secondary)
             .font(.system(size: 13))
@@ -146,22 +153,24 @@ struct ContentView: View {
                 .padding(.top, 6)
 
             Button {
+                showsSettings = false
                 model.selectOfficial(product)
             } label: {
                 OfficialSidebarRow(
                     product: product,
-                    isSelected: model.sidebarSelection == .official(product)
+                    isSelected: !showsSettings && model.sidebarSelection == .official(product)
                 )
             }
             .buttonStyle(.plain)
 
             ForEach(profiles) { profile in
                 Button {
+                    showsSettings = false
                     model.selectProfile(profile.id)
                 } label: {
                     ProfileSidebarRow(
                         profile: profile,
-                        isSelected: model.selectedProfileID == profile.id
+                        isSelected: !showsSettings && model.selectedProfileID == profile.id
                     )
                 }
                 .buttonStyle(.plain)
@@ -178,18 +187,24 @@ struct ContentView: View {
     }
 
     private var detail: some View {
-        VStack(spacing: 0) {
-            detailToolbar
-            Divider()
-                .overlay(AgentDockPalette.divider)
-            Group {
-                switch model.detailTab {
-                case .overview:
-                    OverviewView()
-                case .chats:
-                    ChatsView()
-                case .advanced:
-                    AdvancedView()
+        Group {
+            if showsSettings {
+                SettingsView(presentation: .embedded)
+            } else {
+                VStack(spacing: 0) {
+                    detailToolbar
+                    Divider()
+                        .overlay(AgentDockPalette.divider)
+                    Group {
+                        switch model.detailTab {
+                        case .overview:
+                            OverviewView()
+                        case .chats:
+                            ChatsView()
+                        case .advanced:
+                            AdvancedView()
+                        }
+                    }
                 }
             }
         }
@@ -262,12 +277,18 @@ struct ContentView: View {
             .flatMap(filteredProfiles)
             .first
         if let first {
+            showsSettings = false
             model.selectProfile(first.id)
         }
     }
 
     private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        showsSettings = true
+    }
+
+    private func refreshContent() {
+        model.refreshStats()
+        model.refreshChats()
     }
 
     private var preferredColorScheme: ColorScheme? {

@@ -2,12 +2,49 @@ import AppKit
 import CodexerCore
 import SwiftUI
 
+enum SettingsPresentation {
+    case embedded
+    case window
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var model: CodexerModel
     @EnvironmentObject private var updater: AppUpdater
     @State private var section: SettingsSection = .general
+    let presentation: SettingsPresentation
 
+    init(presentation: SettingsPresentation = .window) {
+        self.presentation = presentation
+    }
+
+    @ViewBuilder
     var body: some View {
+        switch presentation {
+        case .embedded:
+            settingsContent
+                .preferredColorScheme(preferredColorScheme)
+        case .window:
+            settingsContent
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Text("AgentDock — Settings")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                }
+                .frame(
+                    minWidth: 780,
+                    idealWidth: 840,
+                    maxWidth: 880,
+                    minHeight: 560,
+                    idealHeight: 590,
+                    maxHeight: 620
+                )
+                .background(SettingsWindowConfigurator())
+                .preferredColorScheme(preferredColorScheme)
+        }
+    }
+
+    private var settingsContent: some View {
         NavigationSplitView {
             List(SettingsSection.allCases, selection: $section) { item in
                 Label(item.title, systemImage: item.icon)
@@ -25,7 +62,7 @@ struct SettingsView: View {
                     Text("Settings")
                         .font(.system(size: 13))
                     Spacer()
-                    Text(appVersion)
+                    Text(versionAndBuild)
                         .font(.system(size: 13))
                 }
                 .foregroundStyle(.secondary)
@@ -36,23 +73,7 @@ struct SettingsView: View {
         } detail: {
             sectionContent
         }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("AgentDock — Settings")
-                    .font(.system(size: 13, weight: .medium))
-            }
-        }
-        .frame(
-            minWidth: 780,
-            idealWidth: 840,
-            maxWidth: 880,
-            minHeight: 560,
-            idealHeight: 590,
-            maxHeight: 620
-        )
         .navigationSplitViewStyle(.balanced)
-        .background(SettingsWindowConfigurator())
-        .preferredColorScheme(preferredColorScheme)
     }
 
     @ViewBuilder
@@ -104,6 +125,12 @@ struct SettingsView: View {
             }
 
             SettingsSectionHeader("Updates")
+            SettingsRow("AgentDock updates") {
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+                .disabled(!updater.isConfigured)
+            }
             SettingsRow("Check for updates automatically") {
                 Toggle("", isOn: automaticChecksBinding)
                     .labelsHidden()
@@ -141,7 +168,7 @@ struct SettingsView: View {
             .controlSize(.regular)
             .padding(.top, 14)
 
-            Text("AgentDock.app  \(appVersion)   •   Settings save automatically.")
+            Text("AgentDock.app  \(versionAndBuild)   •   Settings save automatically.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 8)
@@ -196,7 +223,7 @@ struct SettingsView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("AgentDock").font(.system(size: 17, weight: .semibold))
-                    Text("Version \(appVersion)")
+                    Text(versionAndBuild)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     Text("Native local profiles for Codex and Claude Desktop.")
@@ -225,6 +252,17 @@ struct SettingsView: View {
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? "Development"
+    }
+
+    private var appBuild: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    }
+
+    private var versionAndBuild: String {
+        guard let appBuild, !appBuild.isEmpty else {
+            return "Version \(appVersion)"
+        }
+        return "Version \(appVersion) (Build \(appBuild))"
     }
 
     private var appearanceBinding: Binding<AgentDockAppearance> {

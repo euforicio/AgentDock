@@ -9,6 +9,7 @@ struct CodexerApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(updater)
                 .frame(minWidth: 900, minHeight: 600)
                 .onAppear {
                     NSApp.setActivationPolicy(.regular)
