@@ -119,6 +119,8 @@ struct ContentView: View {
                 .accessibilityLabel("Settings")
                 .accessibilityHint("Shows AgentDock settings")
 
+                Spacer(minLength: 0)
+
                 if updater.presentation.isVisible {
                     Button {
                         updater.installAvailableUpdate()
@@ -137,7 +139,6 @@ struct ContentView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
-                        .frame(maxWidth: .infinity)
                         .frame(height: 30)
                         .background(AgentDockPalette.blue, in: .rect(cornerRadius: 7))
                     }
@@ -145,20 +146,7 @@ struct ContentView: View {
                     .disabled(updater.presentation.showsProgress)
                     .help(updateButtonHelp)
                     .accessibilityLabel(updateButtonAccessibilityLabel)
-                } else {
-                    Spacer(minLength: 0)
                 }
-
-                Button {
-                    refreshContent()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .frame(width: 28, height: 28)
-                        .background(.white.opacity(0.035), in: .circle)
-                }
-                .buttonStyle(.plain)
-                .help("Refresh profile activity and chats")
-                .accessibilityLabel("Refresh")
             }
             .foregroundStyle(.secondary)
             .font(.system(size: 13))
@@ -293,13 +281,17 @@ struct ContentView: View {
                 .agentDockToolbarAction()
                 .keyboardShortcut("n", modifiers: .command)
 
+                Button(action: refreshContent) {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 14, height: 14)
+                }
+                .agentDockToolbarAction()
+                .help("Refresh profile activity and chats")
+                .accessibilityLabel("Refresh")
+
                 Menu {
                     Button("Restore Profile…") {
                         model.restoreProfile()
-                    }
-                    Divider()
-                    Button("Refresh") {
-                        refreshContent()
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -353,10 +345,23 @@ struct ContentView: View {
     private func refreshContent() {
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .refresh,
-            [.action(.manualRefresh), .surface(.sidebar), .trigger(.user), .countBucket(.init(model.profiles.count))]
+            [
+                .action(.manualRefresh),
+                .surface(selectedDetailAnalyticsSurface),
+                .trigger(.user),
+                .countBucket(.init(model.profiles.count))
+            ]
         ))
         model.refreshStats()
         model.refreshChats()
+    }
+
+    private var selectedDetailAnalyticsSurface: AnalyticsSurface {
+        switch model.detailTab {
+        case .overview: .overview
+        case .chats: .chats
+        case .advanced: .advanced
+        }
     }
 
     private var preferredColorScheme: ColorScheme? {
