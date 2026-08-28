@@ -1,10 +1,64 @@
+import Combine
 import Foundation
 import CodexerCore
 import Sparkle
 
+enum AppUpdatePresentation: Equatable {
+    case hidden
+    case available(version: String)
+    case presenting(version: String)
+    case downloading(version: String)
+    case preparingInstallation(version: String)
+    case installing(version: String)
+    case failed(version: String)
+
+    var isVisible: Bool {
+        self != .hidden
+    }
+
+    var showsProgress: Bool {
+        switch self {
+        case .presenting, .downloading, .preparingInstallation, .installing:
+            true
+        case .hidden, .available, .failed:
+            false
+        }
+    }
+
+    var buttonTitle: String {
+        switch self {
+        case .hidden:
+            ""
+        case .available:
+            "Update"
+        case .presenting:
+            "Opening…"
+        case .downloading:
+            "Downloading…"
+        case .preparingInstallation:
+            "Preparing…"
+        case .installing:
+            "Installing…"
+        case .failed:
+            "Try Again"
+        }
+    }
+
+    var version: String? {
+        switch self {
+        case .hidden:
+            nil
+        case let .available(version), let .presenting(version), let .downloading(version),
+             let .preparingInstallation(version), let .installing(version), let .failed(version):
+            version
+        }
+    }
+}
+
 @MainActor
-final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
+final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate {
     private var controller: SPUStandardUpdaterController!
+    @Published private(set) var presentation = AppUpdatePresentation.hidden
     let isConfigured: Bool
 
     init(bundle: Bundle = .main) {
@@ -15,7 +69,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         controller = SPUStandardUpdaterController(
             startingUpdater: isConfigured,
             updaterDelegate: self,
-            userDriverDelegate: nil
+            userDriverDelegate: self
         )
     }
 
@@ -33,6 +87,18 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
             .updateLifecycle,
             [.action(.updateChecked), .trigger(.user)]
         ))
+        controller.checkForUpdates(nil)
+    }
+
+    func installAvailableUpdate() {
+        guard isConfigured, let version = presentation.version, !presentation.showsProgress else { return }
+        presentation = .presenting(version: version)
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .updateLifecycle,
+            [.action(.updateChecked), .trigger(.user)]
+        ))
+        // Sparkle retains the scheduled update session. Checking again brings its
+        // signed, native download and installation UI into focus.
         controller.checkForUpdates(nil)
     }
 
@@ -57,6 +123,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        presentation = .available(version: item.displayVersionString)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateAvailable), .outcome(.succeeded), .trigger(.automatic)]
@@ -64,6 +131,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
+        presentation = .downloading(version: item.displayVersionString)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateDownloadStarted), .trigger(.automatic)]
@@ -71,6 +139,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
+        presentation = .preparingInstallation(version: item.displayVersionString)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateDownloaded), .outcome(.succeeded), .trigger(.automatic)]
@@ -78,6 +147,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error) {
+        presentation = .failed(version: item.displayVersionString)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateDownloaded), .outcome(.failed), .trigger(.automatic)]
@@ -85,6 +155,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        presentation = .installing(version: item.displayVersionString)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateInstallStarted), .trigger(.automatic)]
@@ -92,9 +163,42 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        if error == nil {
+            presentation = .hidden
+        } else if let version = presentation.version {
+            presentation = .failed(version: version)
+        }
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateCycleCompleted), .outcome(error == nil ? .succeeded : .failed), .trigger(.automatic)]
         ))
+    }
+
+
+    var supportsGentleScheduledUpdateReminders: Bool {
+        true
+    }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        false
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        if !handleShowingUpdate {
+            presentation = .available(version: update.displayVersionString)
+        }
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        if presentation == .available(version: update.displayVersionString) {
+            presentation = .presenting(version: update.displayVersionString)
+        }
     }
 }

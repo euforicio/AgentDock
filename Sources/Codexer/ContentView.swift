@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: CodexerModel
+    @EnvironmentObject private var updater: AppUpdater
     @State private var profileSearch = ""
     @State private var showsSettings = false
     @FocusState private var searchFocused: Bool
@@ -105,10 +106,8 @@ struct ContentView: View {
 
             HStack {
                 Button(action: openSettings) {
-                    Label("Settings", systemImage: "gearshape")
-                        .padding(.horizontal, 8)
-                        .frame(height: 32)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "gearshape")
+                        .frame(width: 28, height: 28)
                         .background(
                             showsSettings ? AgentDockPalette.blue.opacity(0.72) : .clear,
                             in: .rect(cornerRadius: 7)
@@ -116,7 +115,39 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(",", modifiers: .command)
+                .help("Settings")
+                .accessibilityLabel("Settings")
                 .accessibilityHint("Shows AgentDock settings")
+
+                if updater.presentation.isVisible {
+                    Button {
+                        updater.installAvailableUpdate()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if updater.presentation.showsProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "arrow.down.circle.fill")
+                            }
+                            Text(updater.presentation.buttonTitle)
+                                .lineLimit(1)
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(AgentDockPalette.blue, in: .rect(cornerRadius: 7))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(updater.presentation.showsProgress)
+                    .help(updateButtonHelp)
+                    .accessibilityLabel(updateButtonAccessibilityLabel)
+                } else {
+                    Spacer(minLength: 0)
+                }
 
                 Button {
                     refreshContent()
@@ -134,6 +165,18 @@ struct ContentView: View {
             .padding(.horizontal, 12)
             .frame(height: 48)
         }
+    }
+
+    private var updateButtonHelp: String {
+        guard let version = updater.presentation.version else { return "Install update" }
+        return "Install AgentDock \(version)"
+    }
+
+    private var updateButtonAccessibilityLabel: String {
+        guard let version = updater.presentation.version else {
+            return updater.presentation.buttonTitle
+        }
+        return "\(updater.presentation.buttonTitle) AgentDock \(version)"
     }
 
     private var searchField: some View {
