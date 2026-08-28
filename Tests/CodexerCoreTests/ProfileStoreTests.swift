@@ -255,10 +255,35 @@ final class ProfileStoreTests: XCTestCase {
             restored.mcpOAuthCallbackPort,
             original.mcpOAuthCallbackPort
         )
+        XCTAssertEqual(restored.id, original.id)
         try CodexMCPConfiguration.validate(
             codexHomeURL: restored.codexHomePath,
             expectedCallbackPort: original.mcpOAuthCallbackPort
         )
+    }
+
+    func testRestoreRejectsMismatchedPreservedOwnershipMarker() throws {
+        let original = try store.createProfile(name: "Detached")
+        try store.removeProfile(id: original.id, policy: .removeFromList)
+        let markerURL = original.profileDirectory.appendingPathComponent(".codexer-profile.json")
+        let marker = [
+            "profileID": original.id.uuidString,
+            "product": DesktopProduct.codex.rawValue,
+            "slug": "another-profile"
+        ]
+        try JSONSerialization.data(withJSONObject: marker).write(to: markerURL)
+
+        XCTAssertThrowsError(
+            try store.restoreProfile(
+                name: "Restored",
+                profileDirectory: original.profileDirectory
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ProfileStoreError,
+                .invalidOwnershipMarker(original.profileDirectory.path)
+            )
+        }
     }
 
     func testManagedMCPConfigurationDriftFailsWithoutRewritingConfig() throws {

@@ -276,10 +276,16 @@ public final class ProfileStore: @unchecked Sendable {
         )
         defer { withExtendedLifetime(operationLock) {} }
 
+        let slug = canonicalDirectory.lastPathComponent
         let profile = CodexProfile(
+            id: try restoredProfileID(
+                in: canonicalDirectory,
+                product: .claude,
+                slug: slug
+            ),
             product: .claude,
             name: cleanName,
-            slug: canonicalDirectory.lastPathComponent,
+            slug: slug,
             profileDirectory: canonicalDirectory,
             shortcutDirectory: shortcutDirectory(for: .claude),
             iconColor: iconColor
@@ -369,9 +375,15 @@ public final class ProfileStore: @unchecked Sendable {
                 excludingProfileDirectory: canonicalDirectory
             )
         }
+        let slug = canonicalDirectory.lastPathComponent
         let profile = CodexProfile(
+            id: try restoredProfileID(
+                in: canonicalDirectory,
+                product: .codex,
+                slug: slug
+            ),
             name: cleanName,
-            slug: canonicalDirectory.lastPathComponent,
+            slug: slug,
             profileDirectory: canonicalDirectory,
             shortcutDirectory: shortcutDirectory,
             mcpOAuthCallbackPort: callbackPort,
@@ -858,6 +870,9 @@ public final class ProfileStore: @unchecked Sendable {
         else {
             throw ProfileStoreError.overlappingProfileDirectory(candidate.path)
         }
+        guard !others.contains(where: { $0.id == profile.id }) else {
+            throw ProfileStoreError.duplicateProfileID(profile.id)
+        }
     }
 
     private func deleteAllData(for profile: CodexProfile, at index: Int) throws {
@@ -977,6 +992,25 @@ public final class ProfileStore: @unchecked Sendable {
         var priorConfig: Data?
         var priorConfigExisted: Bool?
         var priorConfigPermissions: UInt16?
+    }
+
+    private func restoredProfileID(
+        in profileDirectory: URL,
+        product: DesktopProduct,
+        slug: String
+    ) throws -> UUID {
+        let markerURL = profileDirectory.appendingPathComponent(".codexer-profile.json")
+        guard fileManager.fileExists(atPath: markerURL.path) else {
+            return UUID()
+        }
+        guard let data = try? Data(contentsOf: markerURL),
+              let marker = try? JSONDecoder().decode(OwnershipMarker.self, from: data),
+              marker.product == product || (marker.product == nil && product == .codex),
+              marker.slug == slug
+        else {
+            throw ProfileStoreError.invalidOwnershipMarker(profileDirectory.path)
+        }
+        return marker.profileID
     }
 
     private func ownershipMarkerURL(for profile: CodexProfile) -> URL {

@@ -35,6 +35,33 @@ final class CodexLauncherTests: XCTestCase {
         )
     }
 
+    func testDiscoveryUsesOnlyExactUserDataArgumentWithTrailingFlags() {
+        let selected = configuration(for: makeProfile(slug: "selected"))
+        let other = configuration(for: makeProfile(slug: "other"))
+        let executable = selected.appExecutableURL.path
+        let snapshot = """
+          101 \(executable) --diagnostic=--user-data-dir=/tmp/not-a-profile
+          202 \(executable) --user-data-dir=\(selected.electronUserDataPath) --start-stack-profiler --lang=en-US
+          303 \(executable) --user-data-dir=\(other.electronUserDataPath) --lang=en-US
+        """
+
+        XCTAssertEqual(
+            CodexInstanceDiscovery.processIDs(in: snapshot, configuration: selected),
+            [202]
+        )
+        XCTAssertEqual(
+            CodexInstanceDiscovery.processIDs(in: snapshot, configuration: other),
+            [303]
+        )
+        XCTAssertEqual(
+            CodexInstanceDiscovery.stockProcessIDs(
+                in: snapshot,
+                appExecutableURL: selected.appExecutableURL
+            ),
+            [101]
+        )
+    }
+
     func testProfileProcessDiscoveryIncludesOnlyExecutablesOwnedBySelectedCodexHome() {
         let profile = makeProfile(slug: "work")
         let selectedConfiguration = configuration(for: profile)

@@ -19,6 +19,10 @@ Failed persistence or validation rolls back partial state where safe. A
 destructive delete uses a separate confirmation and fails closed while the
 profile is in use.
 
+Removing a profile from the list preserves its ownership identity. Restoring
+that managed directory reuses the verified marker identifier, so an existing
+profile shortcut remains bound to the same profile.
+
 ## Focus and Close
 
 1. [`DesktopInstanceController`](../Sources/CodexerCore/DesktopInstanceController.swift)

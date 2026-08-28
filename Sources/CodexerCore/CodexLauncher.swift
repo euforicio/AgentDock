@@ -192,7 +192,7 @@ public enum CodexInstanceDiscovery {
         in processSnapshot: String,
         appExecutableURL: URL
     ) -> [String: [Int32]] {
-        let commandPrefix = "\(appExecutableURL.path) --user-data-dir="
+        let executable = appExecutableURL.standardizedFileURL.path
         var result: [String: [Int32]] = [:]
 
         for line in processSnapshot.split(whereSeparator: \.isNewline) {
@@ -200,15 +200,14 @@ public enum CodexInstanceDiscovery {
             guard let separator = trimmed.firstIndex(where: \.isWhitespace) else { continue }
             let pidText = trimmed[..<separator]
             let command = trimmed[separator...].drop(while: \.isWhitespace)
-            guard command.hasPrefix(commandPrefix),
-                  let processID = Int32(pidText)
+            guard let processID = Int32(pidText),
+                  command.hasPrefix("\(executable) ")
             else {
                 continue
             }
-            let userDataPath = canonicalUserDataPath(
-                String(command.dropFirst(commandPrefix.count))
-            )
-            result[userDataPath, default: []].append(processID)
+            for path in userDataArguments(in: String(command)) {
+                result[canonicalUserDataPath(path), default: []].append(processID)
+            }
         }
 
         return result.mapValues { $0.sorted() }
@@ -240,7 +239,7 @@ public enum CodexInstanceDiscovery {
             guard command == executable || command.hasPrefix("\(executable) ") else {
                 return nil
             }
-            return command.contains("--user-data-dir=") ? nil : processID
+            return userDataArguments(in: command).isEmpty ? processID : nil
         }.sorted()
     }
 
@@ -327,6 +326,31 @@ public enum CodexInstanceDiscovery {
         let followsArgument = range.upperBound == command.endIndex
             || command[range.upperBound].isWhitespace
         return beginsArgument && followsArgument
+    }
+
+    private static func userDataArguments(in command: String) -> [String] {
+        let marker = "--user-data-dir="
+        var values: [String] = []
+        var searchStart = command.startIndex
+        while let markerRange = command.range(
+            of: marker,
+            range: searchStart..<command.endIndex
+        ) {
+            let beginsArgument = markerRange.lowerBound == command.startIndex
+                || command[command.index(before: markerRange.lowerBound)].isWhitespace
+            let valueStart = markerRange.upperBound
+            let remaining = command[valueStart...]
+            let valueEnd = remaining.range(of: " --")?.lowerBound ?? command.endIndex
+            if beginsArgument {
+                let value = command[valueStart..<valueEnd]
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                if !value.isEmpty {
+                    values.append(value)
+                }
+            }
+            searchStart = valueEnd
+        }
+        return values
     }
 }
 

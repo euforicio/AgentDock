@@ -171,8 +171,14 @@ public struct ClaudeDesktopContractProbe: @unchecked Sendable {
         }
 
         let marker = Data("CLAUDE_USER_DATA_DIR".utf8)
-        let userDataSetPath = Data(#"setPath("userData""#.utf8)
-        let logsSetPath = Data(#"setPath("logs""#.utf8)
+        let userDataSetPaths = [
+            Data(#"setPath("userData""#.utf8),
+            Data("setPath(`userData`".utf8)
+        ]
+        let logsSetPaths = [
+            Data(#"setPath("logs""#.utf8),
+            Data("setPath(`logs`".utf8)
+        ]
         var searchStart = data.startIndex
         while searchStart < data.endIndex,
               let markerRange = data.range(
@@ -186,8 +192,8 @@ public struct ClaudeDesktopContractProbe: @unchecked Sendable {
                 markerRange.lowerBound + Self.maximumContractWindowBytes
             )
             let contractWindow = data[markerRange.lowerBound..<windowEnd]
-            if contractWindow.range(of: userDataSetPath) != nil,
-               contractWindow.range(of: logsSetPath) != nil
+            if userDataSetPaths.contains(where: { contractWindow.range(of: $0) != nil }),
+               logsSetPaths.contains(where: { contractWindow.range(of: $0) != nil })
             {
                 return
             }

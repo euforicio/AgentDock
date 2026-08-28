@@ -42,6 +42,21 @@ final class ClaudeDesktopTests: XCTestCase {
         }
     }
 
+    func testContractProbeAcceptsMinifiedTemplateLiteralPathNames() throws {
+        let appURL = try temporaryClaudeApp(
+            archive: """
+            if(process.env.CLAUDE_USER_DATA_DIR){
+              let root=process.env.CLAUDE_USER_DATA_DIR;
+              app.setPath(`userData`,root);
+              app.setPath(`logs`,resolve(root,`Logs`));
+            }
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: appURL.deletingLastPathComponent()) }
+
+        XCTAssertNoThrow(try ClaudeDesktopContractProbe().validate(appURL: appURL))
+    }
+
     func testUnsignedBundleCannotControlTrustedClaudeIdentity() throws {
         let appURL = try temporaryClaudeApp(
             archive: """
@@ -167,6 +182,7 @@ final class ClaudeDesktopTests: XCTestCase {
         )
 
         XCTAssertEqual(restored.product, .claude)
+        XCTAssertEqual(restored.id, original.id)
         XCTAssertEqual(restored.claudeUserDataPath, original.claudeUserDataPath)
         XCTAssertFalse(FileManager.default.fileExists(atPath: restored.codexHomePath.path))
     }
