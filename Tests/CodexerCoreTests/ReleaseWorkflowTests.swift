@@ -28,6 +28,20 @@ final class ReleaseWorkflowTests: XCTestCase {
         XCTAssertTrue(workflow.contains("https://euforicio.github.io/AgentDock/appcast.xml"))
     }
 
+    func testReleasePublicationUsesGitHubHostedRunnerWithWritePermission() throws {
+        let workflow = try String(contentsOf: repositoryRoot
+            .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
+
+        XCTAssertTrue(workflow.contains("""
+          release:
+            name: Publish immutable release assets
+            needs: build
+            runs-on: ubuntu-latest
+            permissions:
+              contents: write
+        """))
+    }
+
     func testSignedFeedAlsoVerifiesUpdatesBeforeExtraction() throws {
         let buildScript = try String(contentsOf: repositoryRoot
             .appendingPathComponent("script/build_app.sh"), encoding: .utf8)
