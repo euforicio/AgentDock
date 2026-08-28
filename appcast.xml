@@ -1,0 +1,20 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>AgentDock</title>
+        <item>
+            <title>0.1.4</title>
+            <pubDate>Fri, 28 Aug 2026 14:30:27 -0700</pubDate>
+            <link>https://euforicio.github.io/AgentDock/</link>
+            <sparkle:version>1004</sparkle:version>
+            <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/euforicio/AgentDock/releases/download/v0.1.4/AgentDock-0.1.4.zip" length="6865906" type="application/octet-stream" sparkle:edSignature="DEM+TnJvKBsvve7dhRaxs7GabehZ51xcZexaW14176qAN5D2QqEk7uO5ddR1+Jqn2aCnPlt5bTEqCGyF5Fx4CQ=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: 943po9EfvAOEyz2cRk+s+lpT/kFQAOcqfl9tNn/BaRCo/cln/hkcebwWUhH/ihUrPoZX60S7ltfhko9JtaL/AA==
+length: 1191
+-->
