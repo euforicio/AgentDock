@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     name: Build signed and notarized macOS app
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     env:
       AGENTDOCK_BUILD_SCRATCH_DIR: /tmp/agentdock-release-build
       AGENTDOCK_SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
@@ -232,7 +232,7 @@ jobs:
   appcast:
     name: Sign and publish stable appcast last
     needs: release
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     environment: release
     permissions:
       contents: write
