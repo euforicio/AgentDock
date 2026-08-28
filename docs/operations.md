@@ -53,6 +53,15 @@ Clients use `https://euforicio.github.io/AgentDock/appcast.xml`. Configure
 GitHub Pages to publish from the root of the `gh-pages` branch before the first
 Sparkle-enabled release.
 
+The `Euforicio` organization must also allow **Read and write permissions** for
+GitHub Actions workflow tokens under **Organization Settings → Actions →
+General → Workflow permissions**. The workflow narrows that access to
+`contents: write` only for the release and appcast publication jobs. A
+repository-level write setting cannot override an organization policy that
+caps `GITHUB_TOKEN` at read-only; in that state the signed build still succeeds,
+but GitHub Release creation fails with `Resource not accessible by integration`
+and the appcast is intentionally not published.
+
 ## One-Time Sparkle Key Setup
 
 The repository does not contain a release key. A release operator must create
