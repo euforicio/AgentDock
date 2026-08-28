@@ -40,6 +40,7 @@ final class ReleaseWorkflowTests: XCTestCase {
             permissions:
               contents: write
         """))
+        XCTAssertFalse(workflow.contains("target_commitish:"))
     }
 
     func testSignedFeedAlsoVerifiesUpdatesBeforeExtraction() throws {

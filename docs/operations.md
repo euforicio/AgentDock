@@ -62,6 +62,13 @@ caps `GITHUB_TOKEN` at read-only; in that state the signed build still succeeds,
 but GitHub Release creation fails with `Resource not accessible by integration`
 and the appcast is intentionally not published.
 
+The release action intentionally omits `target_commitish`: the `v*` tag already
+identifies the exact release commit. Supplying a target commit that changes a
+workflow relative to the current default branch makes GitHub require workflow
+write access, which the built-in `GITHUB_TOKEN` cannot receive. When diagnosing
+a release API 403, confirm that the tag points at the intended commit and do not
+work around this boundary with a broad personal access token.
+
 ## One-Time Sparkle Key Setup
 
 The repository does not contain a release key. A release operator must create
