@@ -19,6 +19,11 @@ or conversations change. See
 and automatic-download preferences; AgentDock does not create a parallel
 updater preference store.
 
+[`ProductAnalytics`](../Sources/CodexerCore/ProductAnalytics.swift) is the only
+telemetry egress boundary. It owns consent gating, identifier lifecycle, typed
+schema validation, bounded in-memory batching, and regional HTTPS delivery.
+Call sites cannot add arbitrary event names, keys, or string values.
+
 ### Core
 
 [Sources/CodexerCore](../Sources/CodexerCore) owns the security-sensitive boundaries:

@@ -43,6 +43,8 @@ not use a generic Electron profile flag for Claude.
 - Shortcut configuration plist: binds a generated shortcut to one provider,
   profile root, and ownership identity.
 - Chat indexes: versioned, bounded summary metadata with relative source paths.
+- Analytics consent: `undecided`, `denied`, or `granted` in UserDefaults. A
+  random installation UUID exists only while granted and is deleted on opt-out.
 
 Readers validate containment, type, ownership, and size before using persisted
 paths or provider records.
@@ -58,6 +60,9 @@ The build scripts accept namespaced environment variables including:
 - `AGENTDOCK_NOTARY_KEY_PATH`
 - `AGENTDOCK_NOTARY_KEY_ID`
 - `AGENTDOCK_NOTARY_ISSUER_ID`
+- `AGENTDOCK_POSTHOG_PROJECT_TOKEN` (public `phc_` project token only)
+- `AGENTDOCK_POSTHOG_HOST` (`https://us.i.posthog.com` or
+  `https://eu.i.posthog.com`)
 
 Notarization variables must be supplied together. Release credentials belong in
 GitHub Actions secrets or an ephemeral local process environment, never in

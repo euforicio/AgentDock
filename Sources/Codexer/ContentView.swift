@@ -20,6 +20,9 @@ struct ContentView: View {
         .sheet(isPresented: $model.showAddProfile) {
             AddProfileSheet()
         }
+        .sheet(isPresented: analyticsConsentBinding) {
+            AnalyticsConsentView()
+        }
         .sheet(isPresented: $model.showEditProfile) {
             if let profile = model.selectedProfile {
                 EditProfileSheet(profile: profile)
@@ -62,6 +65,17 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .agentDockFocusSearch)) { _ in
             searchFocused = true
+        }
+        .onChange(of: model.detailTab) { _, tab in
+            let surface: AnalyticsSurface = switch tab {
+            case .overview: .overview
+            case .chats: .chats
+            case .advanced: .advanced
+            }
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .navigation,
+                [.action(.viewed), .surface(surface)]
+            ))
         }
     }
 
@@ -242,8 +256,7 @@ struct ContentView: View {
                     }
                     Divider()
                     Button("Refresh") {
-                        model.refreshStats()
-                        model.refreshChats()
+                        refreshContent()
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -273,6 +286,10 @@ struct ContentView: View {
     }
 
     private func selectFirstSearchResult() {
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .navigation,
+            [.action(.searched), .surface(.sidebar)]
+        ))
         let first = DesktopProduct.allCases
             .flatMap(filteredProfiles)
             .first
@@ -284,9 +301,17 @@ struct ContentView: View {
 
     private func openSettings() {
         showsSettings = true
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .navigation,
+            [.action(.viewed), .surface(.settingsGeneral)]
+        ))
     }
 
     private func refreshContent() {
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .refresh,
+            [.action(.manualRefresh), .surface(.sidebar), .trigger(.user), .countBucket(.init(model.profiles.count))]
+        ))
         model.refreshStats()
         model.refreshChats()
     }
@@ -317,6 +342,13 @@ struct ContentView: View {
         Binding(
             get: { model.pendingDeleteProfile != nil },
             set: { if !$0 { model.pendingDeleteProfile = nil } }
+        )
+    }
+
+    private var analyticsConsentBinding: Binding<Bool> {
+        Binding(
+            get: { model.analyticsConsent == .undecided },
+            set: { _ in }
         )
     }
 }

@@ -39,6 +39,18 @@ if [[ ! "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 SPARKLE_PUBLIC_KEY="${AGENTDOCK_SPARKLE_PUBLIC_KEY:-}"
+POSTHOG_PROJECT_TOKEN="${AGENTDOCK_POSTHOG_PROJECT_TOKEN:-}"
+POSTHOG_HOST="${AGENTDOCK_POSTHOG_HOST:-}"
+if [[ -n "$POSTHOG_PROJECT_TOKEN" || -n "$POSTHOG_HOST" ]]; then
+  if [[ ! "$POSTHOG_PROJECT_TOKEN" =~ ^phc_[A-Za-z0-9_-]{8,128}$ ]]; then
+    echo "error: AGENTDOCK_POSTHOG_PROJECT_TOKEN must be a public phc_ project token" >&2
+    exit 1
+  fi
+  if [[ "$POSTHOG_HOST" != "https://us.i.posthog.com" && "$POSTHOG_HOST" != "https://eu.i.posthog.com" ]]; then
+    echo "error: AGENTDOCK_POSTHOG_HOST must select the configured US or EU ingestion region" >&2
+    exit 1
+  fi
+fi
 if [[ -n "$SPARKLE_PUBLIC_KEY" ]]; then
   SPARKLE_KEY_CHECK="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/agentdock-sparkle-key.XXXXXX")"
   trap '/bin/rm -f "$SPARKLE_KEY_CHECK"' EXIT
@@ -156,6 +168,10 @@ cat >"$INFO_PLIST" <<PLIST
   <true/>
   <key>SUVerifyUpdateBeforeExtraction</key>
   <true/>
+  <key>AgentDockPostHogProjectToken</key>
+  <string>$POSTHOG_PROJECT_TOKEN</string>
+  <key>AgentDockPostHogHost</key>
+  <string>$POSTHOG_HOST</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.developer-tools</string>
   <key>LSMinimumSystemVersion</key>

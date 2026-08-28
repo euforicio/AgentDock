@@ -19,6 +19,9 @@ implementation, contribution, and operations details needed for focused work.
   verification, and publication.
 - [Security and privacy](security.md): trust boundaries, local data handling,
   secret handling, and disclosure guidance.
+- [Privacy policy](privacy.md): local-first and optional analytics commitments.
+- [Product analytics](analytics.md): event catalog, consent, PostHog operations,
+  dashboards, funnels, cohorts, and retention.
 
 ## Community Guides
 

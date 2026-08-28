@@ -19,6 +19,8 @@ jobs:
     env:
       AGENTDOCK_BUILD_SCRATCH_DIR: /tmp/agentdock-release-build
       AGENTDOCK_SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+      AGENTDOCK_POSTHOG_PROJECT_TOKEN: ${{ vars.POSTHOG_PROJECT_TOKEN }}
+      AGENTDOCK_POSTHOG_HOST: ${{ vars.POSTHOG_HOST }}
 
     steps:
       - name: Check out repository

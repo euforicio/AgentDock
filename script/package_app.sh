@@ -92,6 +92,8 @@ PLIST_FEED_URL="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO_PLIST")"
 PLIST_PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO_PLIST")"
 PLIST_REQUIRE_SIGNED_FEED="$(/usr/libexec/PlistBuddy -c 'Print :SURequireSignedFeed' "$INFO_PLIST")"
 PLIST_VERIFY_BEFORE_EXTRACTION="$(/usr/libexec/PlistBuddy -c 'Print :SUVerifyUpdateBeforeExtraction' "$INFO_PLIST")"
+PLIST_POSTHOG_TOKEN="$(/usr/libexec/PlistBuddy -c 'Print :AgentDockPostHogProjectToken' "$INFO_PLIST")"
+PLIST_POSTHOG_HOST="$(/usr/libexec/PlistBuddy -c 'Print :AgentDockPostHogHost' "$INFO_PLIST")"
 
 [[ "$PLIST_BUNDLE_ID" == "dev.euforic.agentdock" ]] || fail "unexpected bundle id: $PLIST_BUNDLE_ID"
 [[ "$PLIST_ICON" == "AppIcon" ]] || fail "unexpected icon file: $PLIST_ICON"
@@ -101,6 +103,13 @@ PLIST_VERIFY_BEFORE_EXTRACTION="$(/usr/libexec/PlistBuddy -c 'Print :SUVerifyUpd
 [[ "$PLIST_REQUIRE_SIGNED_FEED" == "true" ]] || fail "signed Sparkle feeds must be required"
 [[ "$PLIST_VERIFY_BEFORE_EXTRACTION" == "true" ]] \
   || fail "Sparkle updates must be verified before extraction"
+if [[ -n "$PLIST_POSTHOG_TOKEN" || -n "$PLIST_POSTHOG_HOST" ]]; then
+  [[ "$PLIST_POSTHOG_TOKEN" =~ ^phc_[A-Za-z0-9_-]{8,128}$ ]] \
+    || fail "analytics configuration does not contain a public PostHog project token"
+  [[ "$PLIST_POSTHOG_HOST" == "https://us.i.posthog.com" \
+    || "$PLIST_POSTHOG_HOST" == "https://eu.i.posthog.com" ]] \
+    || fail "analytics configuration does not use an approved regional ingestion host"
+fi
 if [[ -n "$SIGNING_IDENTITY" && "$SIGNING_IDENTITY" != "-" ]]; then
   [[ -n "$PLIST_PUBLIC_KEY" ]] || fail "production package is missing SUPublicEDKey"
 fi

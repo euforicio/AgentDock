@@ -42,6 +42,7 @@ final class CodexerModel: ObservableObject {
     @Published private(set) var chatTranscriptEntries: [LocalChatTranscriptEntry] = []
     @Published private(set) var chatTranscriptSourceChanged = false
     @Published var selectedChatID: LocalChatSession.ID?
+    @Published private(set) var analyticsConsent = ProductAnalytics.shared.consent
     @Published var preferences: AgentDockPreferences {
         didSet {
             preferencesStore.save(preferences)
@@ -121,6 +122,10 @@ final class CodexerModel: ObservableObject {
                 ?? DesktopAppRegistry.claude.defaultAppURL
         ]
         startInstanceMonitoring()
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .appLifecycle,
+            [.action(.launched), .trigger(.user)]
+        ))
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -142,6 +147,12 @@ final class CodexerModel: ObservableObject {
                 self.refreshOutdatedShortcuts()
                 self.configureProfileActivityRefresh()
                 await self.refreshInstanceStatuses()
+                for product in DesktopProduct.allCases {
+                    ProductAnalytics.shared.capture(AnalyticsEvent(
+                        .providerStatus,
+                        [.action(.validated), .outcome(.succeeded), .provider(product.analyticsProvider)]
+                    ))
+                }
             case let .failure(error):
                 self.store = nil
                 self.errorMessage = "AgentDock could not load profile metadata safely: \(error.localizedDescription)"
@@ -243,11 +254,19 @@ final class CodexerModel: ObservableObject {
         }
         sidebarSelection = .official(product)
         refreshChats()
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .navigation,
+            [.action(.selected), .surface(.overview), .provider(product.analyticsProvider)]
+        ))
     }
 
     func selectProfile(_ id: CodexProfile.ID?) {
         sidebarSelection = id.map(CodexerSidebarSelection.profile)
         refreshChats()
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .navigation,
+            [.action(.selected), .surface(.overview)]
+        ))
     }
 
     func reload(refreshData: Bool = true) {
@@ -444,6 +463,7 @@ final class CodexerModel: ObservableObject {
         iconValue: String = "",
         customIconData: Data? = nil
     ) async -> Bool {
+        let analyticsStart = ContinuousClock.now
         guard beginStoreMutationIfAvailable() else { return false }
         guard let store else {
             storeMutationInProgress = false
@@ -473,10 +493,26 @@ final class CodexerModel: ObservableObject {
             reload()
             selectProfile(profile.id)
             errorMessage = nil
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .profileLifecycle,
+                [.action(.created), .outcome(.succeeded), .provider(product.analyticsProvider), .countBucket(.init(profiles.count)), .durationBucket(analyticsDurationBucket(since: analyticsStart))]
+            ))
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .featureAdoption,
+                [.action(.created), .feature(.managedProfiles), .provider(product.analyticsProvider)]
+            ))
             return true
         } catch is CancellationError {
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .profileLifecycle,
+                [.action(.created), .outcome(.cancelled), .provider(product.analyticsProvider)]
+            ))
             return false
         } catch {
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .profileLifecycle,
+                [.action(.created), .outcome(.failed), .provider(product.analyticsProvider)]
+            ))
             present(error)
             return false
         }
@@ -521,6 +557,10 @@ final class CodexerModel: ObservableObject {
                 reload()
                 selectProfile(profile.id)
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .profileLifecycle,
+                    [.action(.restored), .outcome(.succeeded), .provider(selectedProduct.analyticsProvider)]
+                ))
             } catch {
                 present(error)
             }
@@ -574,13 +614,22 @@ final class CodexerModel: ObservableObject {
                     refreshRateLimits()
                 }
                 await refreshInstanceStatuses()
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .providerStatus,
+                    [.action(.configured), .outcome(.succeeded), .provider(product.analyticsProvider)]
+                ))
             } catch {
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .providerStatus,
+                    [.action(.configured), .outcome(.failed), .provider(product.analyticsProvider)]
+                ))
                 present(error)
             }
         }
     }
 
     func launch(_ profile: CodexProfile) {
+        let analyticsStart = ContinuousClock.now
         guard !isBusy(profile), !storeMutationInProgress else { return }
         busyProfileIDs.insert(profile.id)
         let appURL = appURL(for: profile.product)
@@ -602,7 +651,15 @@ final class CodexerModel: ObservableObject {
                     }
                 }
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.opened), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .trigger(.user), .durationBucket(analyticsDurationBucket(since: analyticsStart))]
+                ))
             } catch {
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.opened), .outcome(.failed), .provider(profile.product.analyticsProvider), .trigger(.user)]
+                ))
                 present(error)
             }
             await refreshInstanceStatuses()
@@ -627,6 +684,10 @@ final class CodexerModel: ObservableObject {
                     appURL: appURL
                 )
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.opened), .outcome(.succeeded), .provider(product.analyticsProvider), .trigger(.user)]
+                ))
             } catch {
                 present(error)
             }
@@ -645,7 +706,15 @@ final class CodexerModel: ObservableObject {
             do {
                 _ = try await instanceController.close(profile: profile, appURL: appURL)
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.closed), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .trigger(.user)]
+                ))
             } catch {
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.closed), .outcome(.failed), .provider(profile.product.analyticsProvider), .trigger(.user)]
+                ))
                 present(error)
             }
             await refreshInstanceStatuses()
@@ -666,7 +735,19 @@ final class CodexerModel: ObservableObject {
                 }.value
                 reload(refreshData: false)
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.installed), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .trigger(.user)]
+                ))
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .featureAdoption,
+                    [.action(.installed), .feature(.shortcuts), .provider(profile.product.analyticsProvider)]
+                ))
             } catch {
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.installed), .outcome(.failed), .provider(profile.product.analyticsProvider), .trigger(.user)]
+                ))
                 present(error)
             }
         }
@@ -685,6 +766,10 @@ final class CodexerModel: ObservableObject {
                 }.value
                 reload(refreshData: false)
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .launcherLifecycle,
+                    [.action(.uninstalled), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .trigger(.user)]
+                ))
             } catch {
                 present(error)
             }
@@ -710,6 +795,10 @@ final class CodexerModel: ObservableObject {
                 }.value
                 reload()
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .profileLifecycle,
+                    [.action(.removed), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .countBucket(.init(profiles.count))]
+                ))
             } catch {
                 present(error)
             }
@@ -759,6 +848,10 @@ final class CodexerModel: ObservableObject {
                 selectProfile(updated.id)
                 showEditProfile = false
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .profileLifecycle,
+                    [.action(.edited), .outcome(.succeeded), .provider(profile.product.analyticsProvider)]
+                ))
             } catch {
                 present(error)
             }
@@ -791,6 +884,10 @@ final class CodexerModel: ObservableObject {
                 pendingDeleteProfile = nil
                 reload()
                 errorMessage = nil
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .profileLifecycle,
+                    [.action(.deleted), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .countBucket(.init(profiles.count))]
+                ))
             } catch {
                 present(error)
             }
@@ -861,6 +958,7 @@ final class CodexerModel: ObservableObject {
     }
 
     func refreshChats() {
+        let analyticsStart = ContinuousClock.now
         chatGeneration += 1
         let generation = chatGeneration
         chatRefreshTask?.cancel()
@@ -923,6 +1021,14 @@ final class CodexerModel: ObservableObject {
                 result.sessions.contains(where: { $0.id == preferred }) ? preferred : nil
             } ?? result.sessions.first?.id
             chatsLoading = false
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .chatUsage,
+                [.action(.listed), .outcome(.succeeded), .countBucket(.init(result.sessions.count)), .durationBucket(analyticsDurationBucket(since: analyticsStart))]
+            ))
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .featureAdoption,
+                [.action(.viewed), .feature(.chats), .surface(.chats)]
+            ))
             loadSelectedChatTranscript()
             startChatChangeMonitoring(
                 selection: selection,
@@ -935,6 +1041,10 @@ final class CodexerModel: ObservableObject {
     func selectChat(_ id: LocalChatSession.ID) {
         guard id != selectedChatID else { return }
         selectedChatID = id
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .chatUsage,
+            [.action(.transcriptOpened)]
+        ))
         loadSelectedChatTranscript()
     }
 
@@ -999,6 +1109,10 @@ final class CodexerModel: ObservableObject {
         else {
             return
         }
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .chatUsage,
+            [.action(.transcriptPageLoaded)]
+        ))
         let scanner = chatScanner
         let generation = chatTranscriptGeneration
         chatOlderTranscriptLoading = true
@@ -1102,6 +1216,10 @@ final class CodexerModel: ObservableObject {
                     matchingPolls = 1
                 }
                 if matchingPolls >= 2 {
+                    ProductAnalytics.shared.capture(AnalyticsEvent(
+                        .refresh,
+                        [.action(.automaticRefresh), .surface(.chats), .trigger(.automatic)]
+                    ))
                     refreshChats()
                     return
                 }
@@ -1112,6 +1230,16 @@ final class CodexerModel: ObservableObject {
     func restorePreferences() {
         preferencesStore.restoreDefaults()
         preferences = .defaults
+    }
+
+    func setAnalyticsConsent(granted: Bool, surface: AnalyticsSurface) {
+        if granted {
+            ProductAnalytics.shared.grantConsent(surface: surface)
+            analyticsConsent = .granted
+        } else {
+            ProductAnalytics.shared.denyConsent()
+            analyticsConsent = .denied
+        }
     }
 
     func shortcutExists(for profile: CodexProfile) -> Bool {
@@ -1142,6 +1270,10 @@ final class CodexerModel: ObservableObject {
             }.value
             guard let self else { return }
             installedShortcutProfileIDs.formUnion(candidates.map(\.id))
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .launcherLifecycle,
+                [.action(.repaired), .outcome(failures.isEmpty ? .succeeded : .failed), .provider(.mixed), .trigger(.automatic), .countBucket(.init(candidates.count))]
+            ))
             if let firstFailure = failures.first {
                 errorMessage = "AgentDock updated, but a profile shortcut could not be refreshed: \(firstFailure)"
             }
@@ -1150,6 +1282,8 @@ final class CodexerModel: ObservableObject {
 
     private func present(_ error: Error) {
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        let code: AnalyticsErrorCode = error is CodexerModelError ? .storeUnavailable : .unknownSafe
+        ProductAnalytics.shared.capture(AnalyticsEvent(.error, [.errorCode(code)]))
     }
 
     private func beginStoreMutationIfAvailable() -> Bool {
@@ -1204,6 +1338,10 @@ final class CodexerModel: ObservableObject {
                     return
                 }
                 guard !Task.isCancelled, let self else { return }
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .refresh,
+                    [.action(.automaticRefresh), .surface(.overview), .trigger(.automatic), .countBucket(.init(self.profiles.count))]
+                ))
                 self.refreshStats()
                 if self.detailTab == .chats {
                     self.refreshChats()
@@ -1339,12 +1477,30 @@ final class CodexerModel: ObservableObject {
     }
 }
 
+private extension DesktopProduct {
+    var analyticsProvider: AnalyticsProvider {
+        switch self {
+        case .codex: .codex
+        case .claude: .claude
+        }
+    }
+}
+
 private enum CodexerModelError: LocalizedError {
     case storeUnavailable
 
     var errorDescription: String? {
         "Profile storage is unavailable. Resolve the profile metadata error and relaunch AgentDock."
     }
+}
+
+private func analyticsDurationBucket(
+    since start: ContinuousClock.Instant
+) -> AnalyticsDurationBucket {
+    let components = start.duration(to: .now).components
+    let milliseconds = components.seconds * 1_000
+        + components.attoseconds / 1_000_000_000_000_000
+    return AnalyticsDurationBucket(milliseconds: Int(clamping: milliseconds))
 }
 
 extension Color {

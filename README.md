@@ -84,7 +84,10 @@ permanent deletion is a separate confirmed action.
 ## Local Data and Privacy
 
 AgentDock is local-first. It does not provide cloud synchronization or upload
-managed profile data. It stores profile metadata and indexes under
+managed profile data. Optional pseudonymous product analytics are disabled by
+default, require explicit consent, and can be revoked immediately. They never
+include profile, account, path, command, prompt, chat, transcript, session,
+configuration, log, or crash content. AgentDock stores profile metadata and indexes under
 `~/Library/Application Support/AgentDock/` and creates shortcuts under
 `~/Applications/AgentDock/`.
 
@@ -99,8 +102,9 @@ Local transcript support is source-dependent:
   cookies or browser caches.
 
 Indexes contain bounded list metadata, not full transcript bodies or absolute
-working directories. See [Security and privacy](docs/security.md) and
-[Data flows](docs/data-flows.md) for the complete trust boundaries.
+working directories. See [Security and privacy](docs/security.md),
+[Data flows](docs/data-flows.md), and the exact optional
+[Product analytics event catalog](docs/analytics.md).
 
 ## Documentation
 

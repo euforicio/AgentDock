@@ -17,30 +17,37 @@ struct SettingsView: View {
         self.presentation = presentation
     }
 
-    @ViewBuilder
     var body: some View {
-        switch presentation {
-        case .embedded:
-            embeddedSettingsContent
-                .preferredColorScheme(preferredColorScheme)
-        case .window:
-            settingsContent
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        Text("AgentDock — Settings")
-                            .font(.system(size: 13, weight: .medium))
+        Group {
+            switch presentation {
+            case .embedded:
+                embeddedSettingsContent
+                    .preferredColorScheme(preferredColorScheme)
+            case .window:
+                settingsContent
+                    .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            Text("AgentDock — Settings")
+                                .font(.system(size: 13, weight: .medium))
+                        }
                     }
-                }
-                .frame(
-                    minWidth: 780,
-                    idealWidth: 840,
-                    maxWidth: 880,
-                    minHeight: 560,
-                    idealHeight: 590,
-                    maxHeight: 620
-                )
-                .background(SettingsWindowConfigurator())
-                .preferredColorScheme(preferredColorScheme)
+                    .frame(
+                        minWidth: 780,
+                        idealWidth: 840,
+                        maxWidth: 880,
+                        minHeight: 560,
+                        idealHeight: 590,
+                        maxHeight: 620
+                    )
+                    .background(SettingsWindowConfigurator())
+                    .preferredColorScheme(preferredColorScheme)
+            }
+        }
+        .onChange(of: section) { _, value in
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .navigation,
+                [.action(.viewed), .surface(value.analyticsSurface)]
+            ))
         }
     }
 
@@ -211,11 +218,33 @@ struct SettingsView: View {
                 }
             }
             Text(
-                "AgentDock reads only managed profile metadata and supported local Codex session records. It does not upload profile data or provide cloud synchronization."
+                "AgentDock reads only managed profile metadata and supported local session records. It does not upload profile data or provide cloud synchronization."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .padding(.vertical, 12)
+
+            SettingsSectionHeader("Optional Product Analytics")
+            SettingsRow("Share pseudonymous product analytics", height: 56) {
+                Toggle("", isOn: analyticsBinding).labelsHidden()
+            }
+            Text(
+                "Off by default. When enabled, AgentDock sends only allowlisted feature actions, outcomes, safe error codes, coarse count and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 12)
+            if !ProductAnalytics.shared.isConfigured {
+                Label("Analytics delivery is not configured in this build; no events can be sent.", systemImage: "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Link(
+                "View exact analytics event catalog",
+                destination: URL(string: "https://github.com/euforicio/AgentDock/blob/main/docs/analytics.md")!
+            )
+            .font(.system(size: 12))
+            .padding(.top, 10)
 
             SettingsSectionHeader("Provider Data")
             Text("Provider apps may use their own network services and account storage. AgentDock's isolation boundary is described in the project documentation.")
@@ -278,15 +307,33 @@ struct SettingsView: View {
     }
 
     private var appearanceBinding: Binding<AgentDockAppearance> {
-        Binding(get: { model.preferences.appearance }, set: { model.preferences.appearance = $0 })
+        Binding(get: { model.preferences.appearance }, set: {
+            model.preferences.appearance = $0
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .preferenceChanged,
+                [.action(.appearanceChanged), .surface(.settingsGeneral)]
+            ))
+        })
     }
 
     private var defaultViewBinding: Binding<AgentDockDefaultView> {
-        Binding(get: { model.preferences.defaultView }, set: { model.preferences.defaultView = $0 })
+        Binding(get: { model.preferences.defaultView }, set: {
+            model.preferences.defaultView = $0
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .preferenceChanged,
+                [.action(.defaultViewChanged), .surface(.settingsGeneral)]
+            ))
+        })
     }
 
     private var refreshBinding: Binding<Bool> {
-        Binding(get: { model.preferences.refreshProfileActivity }, set: { model.preferences.refreshProfileActivity = $0 })
+        Binding(get: { model.preferences.refreshProfileActivity }, set: {
+            model.preferences.refreshProfileActivity = $0
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .preferenceChanged,
+                [.action(.activityRefreshChanged), .surface(.settingsGeneral), .enabled($0)]
+            ))
+        })
     }
 
     private var refreshIntervalBinding: Binding<Int> {
@@ -294,7 +341,13 @@ struct SettingsView: View {
     }
 
     private var showStatusBinding: Binding<Bool> {
-        Binding(get: { model.preferences.showStatusInProfileList }, set: { model.preferences.showStatusInProfileList = $0 })
+        Binding(get: { model.preferences.showStatusInProfileList }, set: {
+            model.preferences.showStatusInProfileList = $0
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .preferenceChanged,
+                [.action(.statusVisibilityChanged), .surface(.settingsGeneral), .enabled($0)]
+            ))
+        })
     }
 
     private var automaticChecksBinding: Binding<Bool> {
@@ -308,6 +361,13 @@ struct SettingsView: View {
         Binding(
             get: { updater.automaticallyDownloadsUpdates },
             set: { updater.setAutomaticallyDownloadsUpdates($0) }
+        )
+    }
+
+    private var analyticsBinding: Binding<Bool> {
+        Binding(
+            get: { model.analyticsConsent == .granted },
+            set: { model.setAnalyticsConsent(granted: $0, surface: .settingsPrivacy) }
         )
     }
 }
@@ -486,6 +546,15 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .providerApps: "square.grid.2x2"
         case .privacy: "lock"
         case .about: "info.circle"
+        }
+    }
+
+    var analyticsSurface: AnalyticsSurface {
+        switch self {
+        case .general: .settingsGeneral
+        case .providerApps: .settingsProviders
+        case .privacy: .settingsPrivacy
+        case .about: .settingsAbout
         }
     }
 }
