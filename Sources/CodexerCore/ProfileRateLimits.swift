@@ -69,9 +69,15 @@ public enum RateLimitParser {
             throw RateLimitParserError.missingResult
         }
 
-        let snapshots = result.rateLimitsByLimitId?.values.sorted { lhs, rhs in
+        let mappedSnapshots = result.rateLimitsByLimitId?.values.sorted { lhs, rhs in
             (lhs.limitId ?? lhs.limitName ?? "") < (rhs.limitId ?? rhs.limitName ?? "")
-        } ?? [result.rateLimits]
+        } ?? []
+        let snapshots = mappedSnapshots.isEmpty
+            ? result.rateLimits.map { [$0] } ?? []
+            : mappedSnapshots
+        guard let primarySnapshot = result.rateLimits ?? snapshots.first else {
+            throw RateLimitParserError.missingResult
+        }
 
         let buckets = snapshots.compactMap { snapshot -> RateLimitBucket? in
             let id = snapshot.limitId ?? snapshot.limitName ?? "default"
@@ -86,9 +92,9 @@ public enum RateLimitParser {
         }
 
         return ProfileRateLimits(
-            planType: result.rateLimits.planType,
+            planType: primarySnapshot.planType,
             buckets: buckets,
-            credits: result.rateLimits.credits?.usage,
+            credits: primarySnapshot.credits?.usage,
             fetchedAt: fetchedAt
         )
     }
@@ -123,7 +129,7 @@ private struct AppServerRateLimitEnvelope: Decodable {
 }
 
 private struct AppServerRateLimitResult: Decodable {
-    var rateLimits: AppServerRateLimitSnapshot
+    var rateLimits: AppServerRateLimitSnapshot?
     var rateLimitsByLimitId: [String: AppServerRateLimitSnapshot]?
 }
 

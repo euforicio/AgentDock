@@ -70,6 +70,29 @@ final class RateLimitParserTests: XCTestCase {
         XCTAssertEqual(limits.buckets.first?.primary?.usedPercent, 12)
     }
 
+    func testAcceptsLimitMapWhenLegacyPrimarySnapshotIsAbsent() throws {
+        let json = Data("""
+        {
+          "id": 2,
+          "result": {
+            "rateLimitsByLimitId": {
+              "codex": {
+                "limitId": "codex",
+                "planType": "pro",
+                "primary": {"usedPercent": 27}
+              }
+            }
+          }
+        }
+        """.utf8)
+
+        let limits = try RateLimitParser.parseResponse(json)
+
+        XCTAssertEqual(limits.planType, "pro")
+        XCTAssertEqual(limits.buckets.map(\.id), ["codex"])
+        XCTAssertEqual(limits.buckets.first?.primary?.usedPercent, 27)
+    }
+
     func testBusinessPlanAcceptsNullCreditBalanceAndMissingWindows() throws {
         let json = Data("""
         {

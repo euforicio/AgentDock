@@ -101,6 +101,52 @@ final class LocalChatScannerTests: XCTestCase {
         XCTAssertFalse(entries.contains { $0.text.contains("/private/tmp") })
         XCTAssertFalse(entries.contains { $0.text.contains("private instructions") })
         XCTAssertFalse(entries.contains { $0.text.contains("must not render") })
+        XCTAssertTrue(entries.contains {
+            $0.kind == .unsupported && $0.text.contains("Unsupported Future Event")
+        })
+    }
+
+    func testPartialDatabaseIndexStillDiscoversUnindexedSessionFiles() throws {
+        let profile = makeProfile("Partial Database")
+        let indexed = try sessionFile(profile: profile, name: "rollout-indexed.jsonl")
+        let fallback = try sessionFile(profile: profile, name: "rollout-fallback.jsonl")
+        try writeRecords([
+            sessionMeta(id: "indexed-session"),
+            message(role: "user", text: "Indexed conversation", second: 1)
+        ], to: indexed)
+        try writeRecords([
+            sessionMeta(id: "fallback-session"),
+            message(role: "user", text: "Filesystem conversation", second: 2)
+        ], to: fallback)
+        let database = profile.codexHomePath.appendingPathComponent("state_5.sqlite")
+        try runSQLite(database, sql: """
+        create table threads (
+          id text,
+          rollout_path text,
+          title text,
+          updated_at integer
+        );
+        insert into threads values (
+          'indexed-session',
+          '\(indexed.path)',
+          'Database conversation',
+          1785232860
+        );
+        """)
+
+        let result = makeScanner().scan(profile: profile)
+
+        XCTAssertTrue(result.diagnostics.usedDatabase)
+        XCTAssertEqual(result.diagnostics.parsedFileCount, 1)
+        XCTAssertEqual(Set(result.sessions.map(\.id)), ["indexed-session", "fallback-session"])
+        XCTAssertEqual(
+            result.sessions.first { $0.id == "indexed-session" }?.title,
+            "Database conversation"
+        )
+        XCTAssertEqual(
+            result.sessions.first { $0.id == "fallback-session" }?.title,
+            "Filesystem conversation"
+        )
     }
 
     func testArchivedOnlyHistoryIsIndexed() throws {

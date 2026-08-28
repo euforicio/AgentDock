@@ -448,6 +448,7 @@ struct ChatsView: View {
         case .status: .status
         case .malformed: .malformed
         case .oversized: .unsupported
+        case .unsupported: .unsupported
         }
     }
 

@@ -73,6 +73,31 @@ final class CodexerModelTests: XCTestCase {
         XCTAssertEqual(model.stats(for: profile).totalSessions, 2)
     }
 
+    func testPartialRefreshClearsCancelledFullRefreshLoadingState() throws {
+        let store = try makeStore()
+        let first = try store.createProfile(product: .claude, name: "First")
+        let second = try store.createProfile(product: .claude, name: "Second")
+        let model = CodexerModel(
+            store: store,
+            codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app"),
+            statsScanner: ProfileStatsScanner(),
+            rateLimitClient: AppServerRateLimitClient(
+                codexExecutable: URL(fileURLWithPath: "/usr/bin/false"),
+                timeoutSeconds: 0.1
+            ),
+            startMonitoring: false
+        )
+
+        model.refreshStats()
+        XCTAssertEqual(model.statsLoadingProfileIDs, [first.id, second.id])
+        XCTAssertTrue(model.officialStatsLoading)
+
+        model.refreshStats(for: first)
+
+        XCTAssertEqual(model.statsLoadingProfileIDs, [first.id])
+        XCTAssertFalse(model.officialStatsLoading)
+    }
+
     func testStoreMutationIsRejectedWhileLaunchIsInFlight() async throws {
         let store = try makeStore()
         let profile = try store.createProfile(name: "Existing")

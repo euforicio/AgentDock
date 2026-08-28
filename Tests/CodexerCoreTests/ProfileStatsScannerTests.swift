@@ -127,6 +127,31 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertTrue(stats.errorMessages.isEmpty)
     }
 
+    func testThreadSchemaWithoutOptionalUsageColumnsStillReportsSessions() throws {
+        let profile = CodexProfile(name: "Minimal", slug: "minimal", rootDirectory: root)
+        try FileManager.default.createDirectory(at: profile.codexHomePath, withIntermediateDirectories: true)
+        let state = profile.codexHomePath.appendingPathComponent("state_5.sqlite")
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let recentMilliseconds = Int(now.timeIntervalSince1970 * 1_000) - 60_000
+        try runSQLite(state, sql: """
+        create table threads (
+          id text primary key,
+          updated_at_ms integer not null
+        );
+        insert into threads values ('minimal-thread', \(recentMilliseconds));
+        """)
+
+        let stats = ProfileStatsScanner().stats(for: profile, now: now)
+
+        XCTAssertEqual(stats.totalSessions, 1)
+        XCTAssertEqual(stats.weeklySessions, 1)
+        XCTAssertEqual(stats.activeSessions, 1)
+        XCTAssertEqual(stats.archivedSessions, 0)
+        XCTAssertEqual(stats.totalTokens, 0)
+        XCTAssertEqual(stats.lastActivityAt, Date(timeIntervalSince1970: 1_699_999_940))
+        XCTAssertTrue(stats.errorMessages.isEmpty)
+    }
+
     func testClosedWALDatabasesRemainReadableWithoutSidecarFiles() throws {
         let profile = CodexProfile(name: "Closed", slug: "closed", rootDirectory: root)
         try FileManager.default.createDirectory(at: profile.codexHomePath, withIntermediateDirectories: true)

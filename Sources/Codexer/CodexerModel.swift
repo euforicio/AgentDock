@@ -313,6 +313,10 @@ final class CodexerModel: ObservableObject {
         )
     }
 
+    func refreshStats(for profile: CodexProfile) {
+        refreshStats(for: [profile], replaceAll: false)
+    }
+
     func refreshRateLimits() {
         refreshRateLimits(
             for: profiles.filter { $0.product == .codex },
@@ -325,6 +329,8 @@ final class CodexerModel: ObservableObject {
         statsGeneration += 1
         let generation = statsGeneration
         let scanner = statsScanner
+        statsLoadingProfileIDs.removeAll()
+        officialStatsLoading = false
         if replaceAll {
             statsLoadingProfileIDs = Set(profiles.map(\.id))
             officialStatsLoading = true
@@ -589,7 +595,7 @@ final class CodexerModel: ObservableObject {
                 }.value
                 reload(refreshData: false)
                 if let updated = store.profiles.first(where: { $0.id == profile.id }) {
-                    refreshStats(for: [updated], replaceAll: false)
+                    refreshStats(for: updated)
                     if updated.product == .codex {
                         refreshRateLimits(for: [updated], replaceAll: false)
                     }

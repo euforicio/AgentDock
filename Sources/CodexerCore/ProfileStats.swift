@@ -82,33 +82,25 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         guard !Task.isCancelled else { return stats }
 
         if fileManager.fileExists(atPath: stateDatabase.path) {
-            let stateRows = queryRows(
+            let columns = tableColumns(
                 database: stateDatabase,
-                sql: """
-                select
-                  'summary',
-                  count(*),
-                  coalesce(sum(case when updated_at >= \(weekStart) then 1 else 0 end), 0),
-                  coalesce(sum(case when archived = 0 then 1 else 0 end), 0),
-                  coalesce(sum(case when archived != 0 then 1 else 0 end), 0),
-                  coalesce(sum(tokens_used), 0),
-                  coalesce(sum(case when updated_at >= \(weekStart) then tokens_used else 0 end), 0),
-                  coalesce(max(tokens_used), 0),
-                  coalesce(max(updated_at), 0)
-                from threads;
-                select
-                  'bucket',
-                  cast(updated_at / 86400 as integer) * 86400 as day_start,
-                  sum(tokens_used),
-                  count(*)
-                from threads
-                where updated_at >= \(weekStart) and tokens_used > 0
-                group by day_start
-                order by day_start;
-                """,
-                operation: "profile state",
+                table: "threads",
                 errors: &stats.errorMessages
             )
+            let stateRows: [[String]]
+            if columns.isEmpty {
+                stats.errorMessages.append(
+                    "Could not read profile state: the threads table is unavailable."
+                )
+                stateRows = []
+            } else {
+                stateRows = profileStateRows(
+                    database: stateDatabase,
+                    columns: columns,
+                    weekStart: weekStart,
+                    errors: &stats.errorMessages
+                )
+            }
             if let sessionValues = stateRows.first(where: { $0.first == "summary" }),
                sessionValues.count >= 9
             {
@@ -194,6 +186,79 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         }
 
         return stats
+    }
+
+    private func profileStateRows(
+        database: URL,
+        columns: Set<String>,
+        weekStart: Int,
+        errors: inout [String]
+    ) -> [[String]] {
+        let timestampColumn = [
+            "recency_at_ms", "updated_at_ms", "updated_at", "created_at_ms", "created_at"
+        ].first(where: columns.contains)
+        let timestampExpression: String
+        if let timestampColumn {
+            timestampExpression = timestampColumn.hasSuffix("_ms")
+                ? "cast(\(timestampColumn) / 1000 as integer)"
+                : timestampColumn
+        } else {
+            timestampExpression = "0"
+        }
+        let tokenColumn = ["tokens_used", "token_count"].first(where: columns.contains)
+        let tokenExpression = tokenColumn.map { "coalesce(\($0), 0)" } ?? "0"
+        let archivedExpression = columns.contains("archived")
+            ? "case when archived is not null and archived != 0 then 1 else 0 end"
+            : "0"
+        let bucketQuery = timestampColumn != nil && tokenColumn != nil
+            ? """
+              select
+                'bucket',
+                cast(\(timestampExpression) / 86400 as integer) * 86400 as day_start,
+                sum(\(tokenExpression)),
+                count(*)
+              from threads
+              where \(timestampExpression) >= \(weekStart) and \(tokenExpression) > 0
+              group by day_start
+              order by day_start;
+              """
+            : ""
+        return queryRows(
+            database: database,
+            sql: """
+            select
+              'summary',
+              count(*),
+              coalesce(sum(case when \(timestampExpression) >= \(weekStart) then 1 else 0 end), 0),
+              coalesce(sum(case when \(archivedExpression) = 0 then 1 else 0 end), 0),
+              coalesce(sum(\(archivedExpression)), 0),
+              coalesce(sum(\(tokenExpression)), 0),
+              coalesce(sum(case when \(timestampExpression) >= \(weekStart) then \(tokenExpression) else 0 end), 0),
+              coalesce(max(\(tokenExpression)), 0),
+              coalesce(max(\(timestampExpression)), 0)
+            from threads;
+            \(bucketQuery)
+            """,
+            operation: "profile state",
+            errors: &errors
+        )
+    }
+
+    private func tableColumns(
+        database: URL,
+        table: String,
+        errors: inout [String]
+    ) -> Set<String> {
+        Set(
+            queryRows(
+                database: database,
+                sql: "pragma table_info(\(table));",
+                operation: "profile schema",
+                errors: &errors
+            ).compactMap { row in
+                row.count > 1 ? row[1] : nil
+            }
+        )
     }
 
     private func querySingleRow(

@@ -39,7 +39,10 @@ profile path.
 
 ## Local Chat Indexing
 
-1. [`LocalChatSession`](../Sources/CodexerCore/LocalChatSession.swift) inventories only supported provider metadata sources.
+1. [`LocalChatSession`](../Sources/CodexerCore/LocalChatSession.swift) inventories
+   only supported provider metadata sources. Codex database rows accelerate
+   metadata lookup but are merged with the bounded session-file inventory
+   rather than treated as a complete list.
 2. The scanner validates source roots, rejects symlinks, bounds file counts and
    bytes, and uses no-follow reads.
 3. AgentDock writes a versioned profile-scoped summary index atomically with
@@ -47,7 +50,9 @@ profile path.
 4. The list presents bounded titles, previews, and source metadata.
 5. Opening a chat reads a bounded transcript page and converts source events
    into the provider-neutral renderer model.
-6. Additional pages append in source order while stable IDs prevent duplicate
+6. Unsupported source events render as bounded, content-free placeholders;
+   malformed records remain visibly distinct.
+7. Additional pages append in source order while stable IDs prevent duplicate
    rows and stale chat switches are suppressed.
 
 Full transcript bodies and tool output are not stored in the summary index.

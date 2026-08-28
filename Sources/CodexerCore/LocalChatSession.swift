@@ -40,6 +40,7 @@ public enum LocalChatTranscriptEntryKind: String, Codable, Sendable {
     case status
     case malformed
     case oversized
+    case unsupported
 }
 
 /// Renderer-facing, source-backed transcript data. The UI decides how compact
@@ -1169,55 +1170,6 @@ public struct LocalChatScanner: @unchecked Sendable {
             ($0.relativePath, $0)
         })
         let databaseRows = indexedRows(codexHomeURL: codexHomeURL)
-        if !databaseRows.isEmpty {
-            var records = databaseRows
-            let databasePaths = Set(databaseRows.map(\.relativePath))
-            for cachedRecord in cached.records where !databasePaths.contains(cachedRecord.relativePath) {
-                let url = codexHomeURL.appendingPathComponent(cachedRecord.relativePath)
-                guard
-                    safeSessionURL(path: url.path, codexHomeURL: codexHomeURL) != nil,
-                    let source = sourceFile(
-                        url: url,
-                        relativePath: cachedRecord.relativePath,
-                        status: cachedRecord.relativePath.hasPrefix("archived_sessions/")
-                            ? "Archived" : cachedRecord.status
-                    ),
-                    source.fileSize == cachedRecord.fileSize,
-                    Self.sameModificationDate(source.modifiedAt, cachedRecord.modifiedAt)
-                else {
-                    continue
-                }
-                records.append(cachedRecord.merging(source: source))
-            }
-            var seenIDs: Set<String> = []
-            records = records.filter { seenIDs.insert($0.id).inserted }
-            records = boundedRecords(records)
-            saveIndex(
-                ChatIndexDocument(version: Self.indexVersion, scopeKey: scopeKey, records: records),
-                scopeKey: scopeKey
-            )
-            return LocalChatScanResult(
-                availability: .available,
-                sessions: records.compactMap {
-                    session(
-                        record: $0,
-                        codexHomeURL: codexHomeURL,
-                        profileID: profileID,
-                        profileName: profileName
-                    )
-                },
-                changeToken: sourceChangeToken(codexHomeURL: codexHomeURL),
-                diagnostics: .init(
-                    cacheHitCount: records.filter {
-                        cachedByPath[$0.relativePath] != nil
-                    }.count,
-                    parsedFileCount: 0,
-                    sourceFileCount: records.count,
-                    usedDatabase: true
-                )
-            )
-        }
-
         let inventory = sourceInventory(codexHomeURL: codexHomeURL)
         guard inventory.rootsExist else {
             return LocalChatScanResult(
@@ -1709,7 +1661,12 @@ public struct LocalChatScanner: @unchecked Sendable {
                     isCollapsible: true
                 )
             }
-            return nil
+            guard itemType != "message" else { return nil }
+            return Self.unsupportedCodexEntry(
+                id: id,
+                type: itemType ?? "response item",
+                timestamp: timestamp
+            )
         case "event_msg":
             let eventType = payload["type"] as? String ?? "Activity"
             switch eventType {
@@ -1749,9 +1706,26 @@ public struct LocalChatScanner: @unchecked Sendable {
                     isCollapsible: true
                 )
             }
-        default:
+        case "session_meta", "turn_context", "world_state":
             return nil
+        default:
+            return Self.unsupportedCodexEntry(id: id, type: type, timestamp: timestamp)
         }
+    }
+
+    private static func unsupportedCodexEntry(
+        id: String,
+        type: String,
+        timestamp: Date?
+    ) -> LocalChatTranscriptEntry {
+        .init(
+            id: id,
+            kind: .unsupported,
+            title: "Unsupported event",
+            text: "A \(humanized(type)) history event is not supported by this AgentDock version.",
+            timestamp: timestamp,
+            isCollapsible: true
+        )
     }
 
     private func claudeTranscriptEntries(
