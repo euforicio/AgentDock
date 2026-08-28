@@ -94,6 +94,41 @@ final class CodexMCPConfigurationTests: XCTestCase {
         XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, 0o600)
     }
 
+    func testBundledValidationHomeExposesConfigWithoutProfileCredentials() throws {
+        let fileManager = FileManager.default
+        let codexHome = fileManager.temporaryDirectory
+            .appendingPathComponent("CodexMCPConfig-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: codexHome) }
+        try fileManager.createDirectory(
+            at: codexHome,
+            withIntermediateDirectories: true
+        )
+        let configURL = codexHome.appendingPathComponent("config.toml")
+        try Data("[features]\nsecret_auth_storage = true\n".utf8).write(to: configURL)
+        try Data("synthetic-auth-state".utf8).write(
+            to: codexHome.appendingPathComponent("auth.json")
+        )
+
+        let validationHome = try CodexMCPConfiguration.makeIsolatedValidationHome(
+            codexHomeURL: codexHome,
+            fileManager: fileManager
+        )
+        defer { try? fileManager.removeItem(at: validationHome) }
+
+        let linkedConfig = validationHome.appendingPathComponent("config.toml")
+        let values = try linkedConfig.resourceValues(forKeys: [.isSymbolicLinkKey])
+        XCTAssertEqual(values.isSymbolicLink, true)
+        XCTAssertEqual(
+            try String(contentsOf: linkedConfig, encoding: .utf8),
+            "[features]\nsecret_auth_storage = true\n"
+        )
+        XCTAssertFalse(fileManager.fileExists(
+            atPath: validationHome.appendingPathComponent("auth.json").path
+        ))
+        let attributes = try fileManager.attributesOfItem(atPath: validationHome.path)
+        XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, 0o700)
+    }
+
     func testConfiguredContentPreservesCRLFAndIgnoresTablesInsideMultilineStrings() throws {
         let existing = [
             "description = \"\"\"",

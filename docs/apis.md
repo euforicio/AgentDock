@@ -68,3 +68,8 @@ tracked files.
 Managed Codex profiles reserve a unique localhost callback port and retain
 profile-local OAuth credential storage settings. AgentDock does not route the
 shared provider URL scheme between simultaneous instances.
+
+Compatibility validation runs the selected Codex bundle against the exact
+profile config through an isolated temporary home. It does not load or refresh
+the profile's account credentials, so expired authentication cannot be
+misreported as an invalid config.

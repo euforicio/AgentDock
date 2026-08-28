@@ -164,13 +164,17 @@ public enum CodexMCPConfiguration {
                 executableURL.path
             )
         }
+        let validationHomeURL = try makeIsolatedValidationHome(
+            codexHomeURL: codexHomeURL
+        )
+        defer { try? FileManager.default.removeItem(at: validationHomeURL) }
         let result = try BoundedSubprocess.run(
             executableURL: executableURL,
             arguments: ["features", "list"],
             timeout: 5,
             maximumOutputBytes: 512 * 1_024,
             captureStandardError: true,
-            environmentOverrides: ["CODEX_HOME": codexHomeURL.path]
+            environmentOverrides: ["CODEX_HOME": validationHomeURL.path]
         )
         let output = String(decoding: result.output, as: UTF8.self)
         guard result.terminationStatus == 0,
@@ -184,6 +188,33 @@ public enum CodexMCPConfiguration {
             throw CodexMCPConfigurationError.bundledCodexRejectedConfig(
                 codexHomeURL.appendingPathComponent("config.toml").path
             )
+        }
+    }
+
+    static func makeIsolatedValidationHome(
+        codexHomeURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        let configURL = codexHomeURL.appendingPathComponent("config.toml")
+        let validationHomeURL = fileManager.temporaryDirectory
+            .appendingPathComponent(
+                "AgentDockCodexConfigProbe-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        do {
+            try fileManager.createDirectory(
+                at: validationHomeURL,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: NSNumber(value: 0o700)]
+            )
+            try fileManager.createSymbolicLink(
+                at: validationHomeURL.appendingPathComponent("config.toml"),
+                withDestinationURL: configURL
+            )
+            return validationHomeURL
+        } catch {
+            try? fileManager.removeItem(at: validationHomeURL)
+            throw error
         }
     }
 
