@@ -201,16 +201,10 @@ else
 fi
 
 DMG_PATH_LEAK=""
-DMG_PATH_LEAK_VALUE=""
 while IFS= read -r -d '' candidate; do
-  MATCHED_BUILD_PATH="$(
-    /usr/bin/strings -a "$candidate" \
-      | /usr/bin/grep -E '/Users/|/private/var/|/var/folders/|runner/work' \
-      || true
-  )"
-  if [[ -n "$MATCHED_BUILD_PATH" ]]; then
+  if /usr/bin/strings -a "$candidate" \
+    | /usr/bin/grep -Eq '/Users/|/private/var/|/var/folders/|runner/work'; then
     DMG_PATH_LEAK="${candidate#"$DMG_VERIFY_MOUNT_DIR"/}"
-    DMG_PATH_LEAK_VALUE="${MATCHED_BUILD_PATH%%$'\n'*}"
     break
   fi
 done < <(/usr/bin/find "$DMG_VERIFY_MOUNT_DIR" -type f -print0)
@@ -218,7 +212,7 @@ done < <(/usr/bin/find "$DMG_VERIFY_MOUNT_DIR" -type f -print0)
 cleanup_dmg_verify_mount
 trap - EXIT
 [[ -z "$DMG_PATH_LEAK" ]] \
-  || fail "DMG contains a build-machine path in $DMG_PATH_LEAK: $DMG_PATH_LEAK_VALUE"
+  || fail "DMG contains a build-machine path in $DMG_PATH_LEAK"
 
 if [[ "$NOTARY_VALUES_SET" -eq 3 ]]; then
   DMG_SIGNING_ARGUMENTS=(

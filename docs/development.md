@@ -53,6 +53,19 @@ check resolves the current GitHub release and verifies that its DMG is
 reachable. The local server exposes the site at `http://localhost:8080` for
 responsive browser testing.
 
+Run the repository-wide privacy audit before a release or after changing build,
+packaging, or publication behavior:
+
+```bash
+brew install gitleaks # one-time prerequisite
+./script/audit_privacy.sh
+```
+
+The audit scans the complete Git history with redacted output, rejects tracked
+machine-specific home paths and sensitive file formats, and runs the website
+privacy checks. Release packaging separately rejects private build paths in the
+signed ZIP and DMG without echoing the matched path into logs.
+
 [`Assets/AppIcon.png`](../Assets/AppIcon.png) is the source of truth for both
 the macOS app icon and the website icon. After changing that artwork, regenerate
 the tracked `.icns` and website copy with:

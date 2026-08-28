@@ -104,6 +104,8 @@ fi
 /usr/bin/grep -Fq 'api.github.com/repos/${repository}/releases/latest' "$SITE_DIR/app.js"
 /usr/bin/grep -Fq 'prefers-reduced-motion' "$SITE_DIR/styles.css"
 /usr/bin/grep -Fq 'Skip to content' "$SITE_DIR/index.html"
+/usr/bin/grep -Fq 'name="referrer" content="no-referrer"' "$SITE_DIR/index.html"
+/usr/bin/grep -Fq 'Content-Security-Policy' "$SITE_DIR/index.html"
 
 if /usr/bin/grep -R -E '/Users/|/private/var/|SPARKLE_PRIVATE|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' "$SITE_DIR"; then
   echo "error: site contains a private path or secret marker" >&2
