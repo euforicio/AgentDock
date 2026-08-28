@@ -28,6 +28,22 @@ final class ReleaseWorkflowTests: XCTestCase {
         XCTAssertTrue(workflow.contains("https://euforicio.github.io/AgentDock/appcast.xml"))
     }
 
+    func testSignedFeedAlsoVerifiesUpdatesBeforeExtraction() throws {
+        let buildScript = try String(contentsOf: repositoryRoot
+            .appendingPathComponent("script/build_app.sh"), encoding: .utf8)
+        let packageScript = try String(contentsOf: repositoryRoot
+            .appendingPathComponent("script/package_app.sh"), encoding: .utf8)
+
+        XCTAssertTrue(buildScript.contains("""
+          <key>SURequireSignedFeed</key>
+          <true/>
+          <key>SUVerifyUpdateBeforeExtraction</key>
+          <true/>
+        """))
+        XCTAssertTrue(packageScript.contains("PLIST_VERIFY_BEFORE_EXTRACTION"))
+        XCTAssertTrue(packageScript.contains("Sparkle updates must be verified before extraction"))
+    }
+
     private var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

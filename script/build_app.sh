@@ -154,6 +154,8 @@ cat >"$INFO_PLIST" <<PLIST
   <true/>
   <key>SURequireSignedFeed</key>
   <true/>
+  <key>SUVerifyUpdateBeforeExtraction</key>
+  <true/>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.developer-tools</string>
   <key>LSMinimumSystemVersion</key>

@@ -87,12 +87,17 @@ PLIST_ICON="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO_PLIST"
 PLIST_MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST")"
 PLIST_FEED_URL="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO_PLIST")"
 PLIST_PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO_PLIST")"
+PLIST_REQUIRE_SIGNED_FEED="$(/usr/libexec/PlistBuddy -c 'Print :SURequireSignedFeed' "$INFO_PLIST")"
+PLIST_VERIFY_BEFORE_EXTRACTION="$(/usr/libexec/PlistBuddy -c 'Print :SUVerifyUpdateBeforeExtraction' "$INFO_PLIST")"
 
 [[ "$PLIST_BUNDLE_ID" == "dev.euforic.agentdock" ]] || fail "unexpected bundle id: $PLIST_BUNDLE_ID"
 [[ "$PLIST_ICON" == "AppIcon" ]] || fail "unexpected icon file: $PLIST_ICON"
 [[ "$PLIST_MIN_OS" == "26.0" ]] || fail "unexpected minimum macOS version: $PLIST_MIN_OS"
 [[ "$PLIST_FEED_URL" == "https://euforicio.github.io/AgentDock/appcast.xml" ]] \
   || fail "unexpected Sparkle feed URL: $PLIST_FEED_URL"
+[[ "$PLIST_REQUIRE_SIGNED_FEED" == "true" ]] || fail "signed Sparkle feeds must be required"
+[[ "$PLIST_VERIFY_BEFORE_EXTRACTION" == "true" ]] \
+  || fail "Sparkle updates must be verified before extraction"
 if [[ -n "$SIGNING_IDENTITY" && "$SIGNING_IDENTITY" != "-" ]]; then
   [[ -n "$PLIST_PUBLIC_KEY" ]] || fail "production package is missing SUPublicEDKey"
 fi
