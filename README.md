@@ -14,6 +14,7 @@ separate application state, can run alongside the stock app and other profiles,
 and can have its own Dock-pinnable shortcut.
 
 [Download the latest notarized release](https://github.com/euforicio/AgentDock/releases/latest)
+· [Visit the website](https://euforicio.github.io/AgentDock/)
 · [Read the documentation](docs/index.md)
 · [Report a bug](https://github.com/euforicio/AgentDock/issues/new?template=bug_report.yml)
 · [Contribute](CONTRIBUTING.md)

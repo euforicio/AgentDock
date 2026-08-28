@@ -36,6 +36,29 @@ Use `./script/build_and_run.sh --verify` to build, launch, and verify that the
 app process exists. Build products and packages are written under ignored
 `.build/` and `dist/` directories.
 
+## Marketing Site
+
+The dependency-free static site is stored under [`site/`](../site). Validate
+it locally with:
+
+```bash
+./script/validate_site.sh
+AGENTDOCK_SITE_NETWORK_VALIDATION=1 ./script/validate_site.sh
+python3 -m http.server 8080 --directory site
+```
+
+The first command validates local HTML, JavaScript, assets, release-link
+fallbacks, accessibility hooks, and repository hygiene. The opt-in network
+check resolves the current GitHub release and verifies that its DMG is
+reachable. The local server exposes the site at `http://localhost:8080` for
+responsive browser testing.
+
+GitHub Pages serves the contents of the `gh-pages` branch. Website publication
+is manual; do not add a push-to-main, pull-request, or dispatch workflow. The
+tag-only release workflow preserves the existing website and publishes only
+the signed `appcast.xml` and `.nojekyll` update metadata after immutable release
+assets are available.
+
 ## Test Suites
 
 ```bash
