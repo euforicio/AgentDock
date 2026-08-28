@@ -33,6 +33,7 @@ SIGNING_KEYCHAIN="${AGENTDOCK_SIGNING_KEYCHAIN:-${CODEXER_SIGNING_KEYCHAIN:-}}"
 BUILD_ARGUMENTS=(
   -c release
   --scratch-path "$BUILD_SCRATCH_DIR"
+  -debug-info-format none
 )
 append_prefix_map() {
   local source_path="${1%/}"

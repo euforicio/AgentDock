@@ -132,14 +132,24 @@ mkdir -p "$DMG_STAGING_DIR"
 /usr/bin/ditto "$STAGING_DIR/$APP_NAME.app" "$DMG_STAGING_DIR/$APP_NAME.app"
 /bin/ln -s /Applications "$DMG_STAGING_DIR/Applications"
 
-COPYFILE_DISABLE=1 /usr/bin/hdiutil create \
-  -volname "$APP_NAME" \
-  -srcfolder "$DMG_STAGING_DIR" \
-  -fs HFS+ \
-  -ov \
-  -format UDZO \
-  -imagekey zlib-level=9 \
-  "$DMG_PATH"
+USE_DISKUTIL_IMAGE=0
+if /usr/sbin/diskutil image create from -help >/dev/null 2>&1; then
+  USE_DISKUTIL_IMAGE=1
+  COPYFILE_DISABLE=1 /usr/sbin/diskutil image create from \
+    --format UDZO \
+    --volumeName "$APP_NAME" \
+    "$DMG_STAGING_DIR" \
+    "$DMG_PATH"
+else
+  COPYFILE_DISABLE=1 /usr/bin/hdiutil create \
+    -volname "$APP_NAME" \
+    -srcfolder "$DMG_STAGING_DIR" \
+    -fs HFS+ \
+    -ov \
+    -format UDZO \
+    -imagekey zlib-level=9 \
+    "$DMG_PATH"
+fi
 
 DMG_VERIFY_MOUNT_DIR="$(/usr/bin/mktemp -d "$DIST_DIR/.dmg-verify-$RELEASE_NAME.XXXXXX")"
 cleanup_dmg_verify_mount() {
@@ -148,11 +158,19 @@ cleanup_dmg_verify_mount() {
 }
 trap cleanup_dmg_verify_mount EXIT
 
-/usr/bin/hdiutil attach "$DMG_PATH" \
-  -readonly \
-  -nobrowse \
-  -noautoopen \
-  -mountpoint "$DMG_VERIFY_MOUNT_DIR" >/dev/null
+if [[ "$USE_DISKUTIL_IMAGE" -eq 1 ]]; then
+  /usr/sbin/diskutil image attach \
+    --readOnly \
+    --nobrowse \
+    --mountPoint "$DMG_VERIFY_MOUNT_DIR" \
+    "$DMG_PATH" >/dev/null
+else
+  /usr/bin/hdiutil attach "$DMG_PATH" \
+    -readonly \
+    -nobrowse \
+    -noautoopen \
+    -mountpoint "$DMG_VERIFY_MOUNT_DIR" >/dev/null
+fi
 
 DMG_PATH_LEAK=""
 DMG_PATH_LEAK_VALUE=""
