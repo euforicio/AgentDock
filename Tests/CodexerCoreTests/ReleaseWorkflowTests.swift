@@ -28,7 +28,7 @@ final class ReleaseWorkflowTests: XCTestCase {
         XCTAssertTrue(workflow.contains("https://euforicio.github.io/AgentDock/appcast.xml"))
     }
 
-    func testReleasePublicationUsesGitHubHostedRunnerWithWritePermission() throws {
+    func testReleasePublicationUsesBlacksmithRunnerWithWritePermission() throws {
         let workflow = try String(contentsOf: repositoryRoot
             .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
 
@@ -36,7 +36,7 @@ final class ReleaseWorkflowTests: XCTestCase {
           release:
             name: Publish immutable release assets
             needs: build
-            runs-on: ubuntu-latest
+            runs-on: blacksmith-4vcpu-ubuntu-2404
             permissions:
               contents: write
         """))

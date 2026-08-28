@@ -201,7 +201,7 @@ jobs:
   release:
     name: Publish immutable release assets
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
 
