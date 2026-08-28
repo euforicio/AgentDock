@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="$ROOT_DIR/site"
+APP_ICON_SOURCE="$ROOT_DIR/Assets/AppIcon.png"
+APP_ICON_ICNS="$ROOT_DIR/Assets/AppIcon.icns"
 
 required_files=(
   index.html
@@ -19,6 +21,22 @@ for relative_path in "${required_files[@]}"; do
     exit 1
   fi
 done
+
+if ! /usr/bin/cmp -s "$APP_ICON_SOURCE" "$SITE_DIR/assets/app-icon.png"; then
+  echo "error: website icon does not match Assets/AppIcon.png" >&2
+  exit 1
+fi
+
+ICON_CHECK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentdock-icon-check.XXXXXX")"
+cleanup() {
+  rm -rf "$ICON_CHECK_DIR"
+}
+trap cleanup EXIT
+/usr/bin/iconutil -c iconset "$APP_ICON_ICNS" -o "$ICON_CHECK_DIR/AppIcon.iconset"
+if ! /usr/bin/cmp -s "$APP_ICON_SOURCE" "$ICON_CHECK_DIR/AppIcon.iconset/icon_512x512@2x.png"; then
+  echo "error: AppIcon.icns does not contain the website icon artwork" >&2
+  exit 1
+fi
 
 /usr/bin/python3 - "$SITE_DIR/index.html" <<'PY'
 from html.parser import HTMLParser
@@ -81,6 +99,8 @@ fi
 
 /usr/bin/grep -Fq 'data-download' "$SITE_DIR/index.html"
 /usr/bin/grep -Fq 'https://github.com/euforicio/AgentDock/releases/latest' "$SITE_DIR/index.html"
+# The JavaScript template expression must remain literal.
+# shellcheck disable=SC2016
 /usr/bin/grep -Fq 'api.github.com/repos/${repository}/releases/latest' "$SITE_DIR/app.js"
 /usr/bin/grep -Fq 'prefers-reduced-motion' "$SITE_DIR/styles.css"
 /usr/bin/grep -Fq 'Skip to content' "$SITE_DIR/index.html"

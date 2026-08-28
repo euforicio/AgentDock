@@ -57,6 +57,9 @@ require_file "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
 require_file "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer"
 require_file "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader"
 require_file "$ICON_FILE"
+if ! /usr/bin/cmp -s "$ROOT_DIR/Assets/AppIcon.icns" "$ICON_FILE"; then
+  fail "bundled AppIcon.icns does not match the tracked app icon"
+fi
 require_file "$LICENSE_FILE"
 require_file "$NOTICES_FILE"
 require_dir "$LICENSES_DIR"

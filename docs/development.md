@@ -53,6 +53,15 @@ check resolves the current GitHub release and verifies that its DMG is
 reachable. The local server exposes the site at `http://localhost:8080` for
 responsive browser testing.
 
+[`Assets/AppIcon.png`](../Assets/AppIcon.png) is the source of truth for both
+the macOS app icon and the website icon. After changing that artwork, regenerate
+the tracked `.icns` and website copy with:
+
+```bash
+./script/generate_app_icon.sh
+./script/validate_site.sh
+```
+
 GitHub Pages serves the contents of the `gh-pages` branch. Website publication
 is manual; do not add a push-to-main, pull-request, or dispatch workflow. The
 tag-only release workflow preserves the existing website and publishes only
