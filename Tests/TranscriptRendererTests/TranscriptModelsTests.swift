@@ -253,6 +253,17 @@ final class TranscriptModelsTests: XCTestCase {
         )
     }
 
+    func testTranscriptScrollElementsHaveStableDistinctIdentity() {
+        let eventID = TranscriptScrollElementID.event("event")
+        let nextEventID = TranscriptScrollElementID.event("next-event")
+
+        XCTAssertEqual(eventID, TranscriptScrollElementID.event("event"))
+        XCTAssertNotEqual(eventID, nextEventID)
+        XCTAssertNotEqual(eventID, .loadMore)
+        XCTAssertNotEqual(eventID, .bottom)
+        XCTAssertNotEqual(TranscriptScrollElementID.loadMore, .bottom)
+    }
+
 
     private func milliseconds(_ duration: Duration) -> String {
         let parts = duration.components

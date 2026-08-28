@@ -29,8 +29,6 @@ private struct TranscriptViewport: View {
     @State private var selectedEventID: TranscriptEvent.ID?
     @State private var maintainsInitialBottomAnchor = false
 
-    private let bottomID = "agentdock-transcript-bottom"
-
     var body: some View {
         GeometryReader { viewport in
             ScrollViewReader { scrollProxy in
@@ -45,13 +43,13 @@ private struct TranscriptViewport: View {
                                 provider: document.provider,
                                 isKeyboardSelected: selectedEventID == event.id
                             )
-                            .id(event.id)
+                            .id(TranscriptScrollElementID.event(event.id))
                         }
 
                         if document.hasOlderEvents || document.isLoadingOlder {
                             MoreEventsControl(isLoading: document.isLoadingOlder)
                                 .padding(.top, 16)
-                                .id(document.events.last?.id ?? "empty")
+                                .id(TranscriptScrollElementID.loadMore)
                                 .onAppear {
                                     guard !document.isLoadingOlder else { return }
                                     onLoadMore()
@@ -60,7 +58,7 @@ private struct TranscriptViewport: View {
 
                         Color.clear
                             .frame(height: 1)
-                            .id(bottomID)
+                            .id(TranscriptScrollElementID.bottom)
                             .background {
                                 GeometryReader { geometry in
                                     Color.clear.preference(
@@ -118,8 +116,14 @@ private struct TranscriptViewport: View {
         }
         let eventID = document.events[nextIndex].id
         selectedEventID = eventID
-        proxy.scrollTo(eventID, anchor: .center)
+        proxy.scrollTo(TranscriptScrollElementID.event(eventID), anchor: .center)
     }
+}
+
+enum TranscriptScrollElementID: Hashable {
+    case event(TranscriptEvent.ID)
+    case loadMore
+    case bottom
 }
 
 @MainActor
