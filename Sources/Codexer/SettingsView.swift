@@ -21,7 +21,7 @@ struct SettingsView: View {
     var body: some View {
         switch presentation {
         case .embedded:
-            settingsContent
+            embeddedSettingsContent
                 .preferredColorScheme(preferredColorScheme)
         case .window:
             settingsContent
@@ -44,8 +44,28 @@ struct SettingsView: View {
         }
     }
 
+    private var embeddedSettingsContent: some View {
+        HStack(spacing: 0) {
+            settingsSidebar
+                .frame(width: 200)
+            Divider()
+            sectionContent
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     private var settingsContent: some View {
         NavigationSplitView {
+            settingsSidebar
+            .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 230)
+        } detail: {
+            sectionContent
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var settingsSidebar: some View {
+        VStack(spacing: 0) {
             List(SettingsSection.allCases, selection: $section) { item in
                 Label(item.title, systemImage: item.icon)
                     .font(.system(size: 14))
@@ -54,26 +74,18 @@ struct SettingsView: View {
                     .tag(item)
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 230)
-            .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 8) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 13))
-                    Text("Settings")
-                        .font(.system(size: 13))
-                    Spacer()
-                    Text(versionAndBuild)
-                        .font(.system(size: 13))
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .frame(height: 44)
-                .overlay(alignment: .top) { Divider() }
+
+            Divider()
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Settings", systemImage: "gearshape")
+                Text(versionAndBuild)
+                    .font(.system(size: 11))
             }
-        } detail: {
-            sectionContent
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
         }
-        .navigationSplitViewStyle(.balanced)
     }
 
     @ViewBuilder
@@ -339,11 +351,14 @@ private struct SettingsRow<Accessory: View>: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 16) {
             Text(title)
                 .font(.system(size: 14))
-            Spacer()
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 16)
             accessory
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 10)
         .frame(minHeight: height)
@@ -403,27 +418,30 @@ private struct ProviderSettingsRow: View {
                 Text("Version \(version)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                Text(abbreviatedPath)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+
             HStack(spacing: 6) {
                 StatusDot(isRunning: isAvailable, size: 7)
                 Text(isAvailable ? "Found" : "Not Found")
                     .font(.system(size: 12))
                     .foregroundStyle(isAvailable ? Color.green : Color.orange)
             }
-            .frame(width: 90, alignment: .leading)
-            Text(abbreviatedPath)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 150, alignment: .trailing)
+            .fixedSize()
+
             Button("Change…") { model.chooseApp(product) }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
+                .fixedSize()
         }
         .padding(.horizontal, 8)
-        .frame(minHeight: 62)
+        .frame(minHeight: 72)
         .overlay(alignment: .bottom) { Divider() }
         .accessibilityElement(children: .contain)
     }
