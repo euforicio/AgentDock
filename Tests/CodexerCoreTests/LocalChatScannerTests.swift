@@ -381,10 +381,11 @@ final class LocalChatScannerTests: XCTestCase {
         let database = profile.codexHomePath.appendingPathComponent("state_5.sqlite")
         let process = Process()
         let input = Pipe()
+        let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = [database.path]
         process.standardInput = input
-        process.standardOutput = Pipe()
+        process.standardOutput = output
         process.standardError = Pipe()
         try process.run()
         defer {
@@ -405,14 +406,18 @@ final class LocalChatScannerTests: XCTestCase {
           'Active WAL chat',
           1785232860
         );
+        select 'agentdock-ready';
 
         """
         try input.fileHandleForWriting.write(contentsOf: Data(sql.utf8))
-        let wal = URL(fileURLWithPath: database.path + "-wal")
-        let deadline = Date().addingTimeInterval(2)
-        while !FileManager.default.fileExists(atPath: wal.path), Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.01)
+        var sqliteOutput = Data()
+        while !sqliteOutput.contains(Data("agentdock-ready\n".utf8)) {
+            let chunk = output.fileHandleForReading.availableData
+            guard !chunk.isEmpty else { break }
+            sqliteOutput.append(chunk)
         }
+        XCTAssertTrue(sqliteOutput.contains(Data("agentdock-ready\n".utf8)))
+        let wal = URL(fileURLWithPath: database.path + "-wal")
         XCTAssertTrue(FileManager.default.fileExists(atPath: wal.path))
 
         let result = makeScanner().scan(profile: profile)
