@@ -13,6 +13,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
+APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_LICENSES="$APP_RESOURCES/Licenses"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
@@ -26,7 +27,29 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "error: AGENTDOCK_VERSION must use MAJOR.MINOR.PATCH format" >&2
   exit 1
 fi
-BUILD_NUMBER="${AGENTDOCK_BUILD_NUMBER:-${CODEXER_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-1}}}"
+IFS=. read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<<"$VERSION"
+if (( 10#$VERSION_MAJOR > 999 || 10#$VERSION_MINOR > 999 || 10#$VERSION_PATCH > 999 )); then
+  echo "error: release version components must be no greater than 999" >&2
+  exit 1
+fi
+DERIVED_BUILD_NUMBER="$((10#$VERSION_MAJOR * 1000000 + 10#$VERSION_MINOR * 1000 + 10#$VERSION_PATCH))"
+BUILD_NUMBER="${AGENTDOCK_BUILD_NUMBER:-${CODEXER_BUILD_NUMBER:-$DERIVED_BUILD_NUMBER}}"
+if [[ ! "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: AGENTDOCK_BUILD_NUMBER must be a positive integer" >&2
+  exit 1
+fi
+SPARKLE_PUBLIC_KEY="${AGENTDOCK_SPARKLE_PUBLIC_KEY:-}"
+if [[ -n "$SPARKLE_PUBLIC_KEY" ]]; then
+  SPARKLE_KEY_CHECK="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/agentdock-sparkle-key.XXXXXX")"
+  trap '/bin/rm -f "$SPARKLE_KEY_CHECK"' EXIT
+  if ! printf '%s' "$SPARKLE_PUBLIC_KEY" | /usr/bin/base64 -D >"$SPARKLE_KEY_CHECK" 2>/dev/null \
+    || [[ "$(/usr/bin/wc -c <"$SPARKLE_KEY_CHECK" | /usr/bin/tr -d ' ')" != "32" ]]; then
+    echo "error: AGENTDOCK_SPARKLE_PUBLIC_KEY must be a base64-encoded 32-byte Ed25519 public key" >&2
+    exit 1
+  fi
+  /bin/rm -f "$SPARKLE_KEY_CHECK"
+  trap - EXIT
+fi
 SIGNING_IDENTITY="${AGENTDOCK_SIGNING_IDENTITY:-${CODEXER_SIGNING_IDENTITY:--}}"
 SIGNING_KEYCHAIN="${AGENTDOCK_SIGNING_KEYCHAIN:-${CODEXER_SIGNING_KEYCHAIN:-}}"
 
@@ -61,11 +84,20 @@ swift build "${BUILD_ARGUMENTS[@]}"
 BUILD_DIR="$(swift build "${BUILD_ARGUMENTS[@]}" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$PRODUCT_BINARY_NAME"
 HELPER_BINARY="$BUILD_DIR/AgentDockShortcutLauncher"
+SPARKLE_DISTRIBUTION="$BUILD_SCRATCH_DIR/artifacts/sparkle/Sparkle"
+SPARKLE_SOURCE="$SPARKLE_DISTRIBUTION/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+SPARKLE_FRAMEWORK="$APP_FRAMEWORKS/Sparkle.framework"
+
+if [[ ! -d "$SPARKLE_SOURCE" ]]; then
+  echo "error: Sparkle.framework was not resolved at $SPARKLE_SOURCE" >&2
+  exit 1
+fi
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_LICENSES"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_FRAMEWORKS" "$APP_LICENSES"
 cp "$BUILD_BINARY" "$APP_BINARY"
 cp "$HELPER_BINARY" "$APP_RESOURCES/AgentDockShortcutLauncher"
+/usr/bin/ditto "$SPARKLE_SOURCE" "$SPARKLE_FRAMEWORK"
 cp -R "$BUILD_DIR/Highlightr_Highlightr.bundle" "$APP_RESOURCES/"
 cp "$ROOT_DIR/LICENSE" "$APP_RESOURCES/LICENSE.txt"
 cp "$ROOT_DIR/THIRD_PARTY_NOTICES.md" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md"
@@ -77,6 +109,7 @@ cp "$BUILD_SCRATCH_DIR/checkouts/Highlightr/LICENSE" "$APP_LICENSES/Highlightr-M
 cp "$BUILD_SCRATCH_DIR/checkouts/Highlightr/src/assets/highlighter/LICENSE" "$APP_LICENSES/highlight.js-BSD-3-Clause.txt"
 cp "$BUILD_SCRATCH_DIR/checkouts/RichText/LICENSE" "$APP_LICENSES/RichText-MIT.txt"
 cp "$BUILD_SCRATCH_DIR/checkouts/swift-cmark/COPYING" "$APP_LICENSES/swift-cmark-COPYING.txt"
+cp "$SPARKLE_DISTRIBUTION/LICENSE" "$APP_LICENSES/Sparkle-MIT.txt"
 chmod 0644 "$APP_RESOURCES/LICENSE.txt" "$APP_RESOURCES/THIRD_PARTY_NOTICES.md" "$APP_LICENSES"/*.txt
 if [[ -f "$ROOT_DIR/Assets/AppIcon.icns" ]]; then
   cp "$ROOT_DIR/Assets/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
@@ -109,6 +142,18 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$VERSION</string>
   <key>CFBundleVersion</key>
   <string>$BUILD_NUMBER</string>
+  <key>SUFeedURL</key>
+  <string>https://euforicio.github.io/AgentDock/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>$SPARKLE_PUBLIC_KEY</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUAllowsAutomaticUpdates</key>
+  <true/>
+  <key>SUAutomaticallyUpdate</key>
+  <true/>
+  <key>SURequireSignedFeed</key>
+  <true/>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.developer-tools</string>
   <key>LSMinimumSystemVersion</key>
@@ -121,22 +166,39 @@ cat >"$INFO_PLIST" <<PLIST
 </plist>
 PLIST
 
-if [[ "$SIGNING_IDENTITY" == "-" ]]; then
-  /usr/bin/codesign --force --sign - "$APP_RESOURCES/AgentDockShortcutLauncher"
-  /usr/bin/codesign --force --sign - "$APP_BUNDLE"
-else
+sign_component() {
+  local preserve_entitlements="$1"
+  local target="$2"
   SIGNING_ARGUMENTS=(
     --force
     --options runtime
-    --timestamp
     --sign "$SIGNING_IDENTITY"
   )
+  if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+    SIGNING_ARGUMENTS+=(--timestamp)
+  fi
   if [[ -n "$SIGNING_KEYCHAIN" ]]; then
     SIGNING_ARGUMENTS+=(--keychain "$SIGNING_KEYCHAIN")
   fi
-  /usr/bin/codesign "${SIGNING_ARGUMENTS[@]}" "$APP_RESOURCES/AgentDockShortcutLauncher"
-  /usr/bin/codesign "${SIGNING_ARGUMENTS[@]}" "$APP_BUNDLE"
-fi
+  if [[ "$preserve_entitlements" == "yes" ]]; then
+    SIGNING_ARGUMENTS+=(--preserve-metadata=entitlements)
+  fi
+  /usr/bin/codesign "${SIGNING_ARGUMENTS[@]}" "$target"
+}
+
+SPARKLE_VERSION_DIR="$SPARKLE_FRAMEWORK/Versions/B"
+sign_component no "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc"
+sign_component yes "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+sign_component no "$SPARKLE_VERSION_DIR/Autoupdate"
+sign_component no "$SPARKLE_VERSION_DIR/Updater.app"
+sign_component no "$SPARKLE_FRAMEWORK"
+sign_component no "$APP_RESOURCES/AgentDockShortcutLauncher"
+sign_component no "$APP_BUNDLE"
+
+/usr/bin/codesign --verify --strict "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc"
+/usr/bin/codesign --verify --strict "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+/usr/bin/codesign --verify --strict "$SPARKLE_VERSION_DIR/Updater.app"
+/usr/bin/codesign --verify --strict "$SPARKLE_FRAMEWORK"
 /usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
 
 echo "Built $APP_BUNDLE"

@@ -33,6 +33,7 @@ and can have its own Dock-pinnable shortcut.
 - Focus and close an exact profile without quitting another running instance.
 - Install native, profile-specific shortcuts under
   `~/Applications/AgentDock/`.
+- Check for, download, and install signed AgentDock updates with Sparkle.
 - Browse supported local chat histories with safe links, tables, selectable
   prose, syntax-highlighted code, and bounded tool output.
 - View supported local activity, storage, usage-limit, and lifecycle
@@ -57,6 +58,10 @@ settings.
 2. Open it and drag AgentDock onto the Applications shortcut.
 3. Launch AgentDock. The release is Developer ID signed, hardened, notarized,
    and stapled for Gatekeeper verification.
+
+AgentDock releases that include Sparkle update themselves from the signed
+stable appcast. Installations from before Sparkle support require this one
+final manual download; automatic updates begin after that version is installed.
 
 Release pages also provide a ZIP and SHA-256 checksums. See
 [Release operations](docs/operations.md) for verification and maintainer

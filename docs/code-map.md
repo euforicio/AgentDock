@@ -6,6 +6,7 @@
 | --- | --- |
 | `Package.swift` | Swift package products, targets, dependencies, and macOS deployment target |
 | `Sources/Codexer/CodexerApp.swift` | Main SwiftUI app entry point |
+| `Sources/Codexer/AppUpdater.swift` | Sparkle controller and user-controlled update settings |
 | `Sources/Codexer/CodexerModel.swift` | UI state, profile operations, refreshes, and chat loading |
 | `Sources/Codexer/ContentView.swift` | Main application shell and navigation |
 | `Sources/CodexerShortcutLauncher/main.swift` | Generated shortcut helper entry point |

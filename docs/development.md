@@ -21,6 +21,17 @@ swift test
 ./script/build_and_run.sh
 ```
 
+Local ad-hoc builds leave `SUPublicEDKey` empty and disable update checks. To
+exercise the configured updater with an existing public key, run:
+
+```bash
+AGENTDOCK_SPARKLE_PUBLIC_KEY='<base64-public-key>' ./script/build_app.sh
+./script/package_app.sh
+```
+
+The public key is not secret. Never place the private Sparkle key in a command
+argument, tracked file, build artifact, or ordinary development environment.
+
 Use `./script/build_and_run.sh --verify` to build, launch, and verify that the
 app process exists. Build products and packages are written under ignored
 `.build/` and `dist/` directories.

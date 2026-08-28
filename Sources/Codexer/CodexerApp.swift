@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct CodexerApp: App {
     @StateObject private var model = CodexerModel()
+    @StateObject private var updater = AppUpdater()
 
     var body: some Scene {
         WindowGroup {
@@ -25,12 +26,10 @@ struct CodexerApp: App {
             }
 
             CommandGroup(after: .appInfo) {
-                Button("View Latest Release…") {
-                    guard let url = URL(string: "https://github.com/euforicio/AgentDock/releases/latest") else {
-                        return
-                    }
-                    NSWorkspace.shared.open(url)
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
                 }
+                .disabled(!updater.isConfigured)
             }
 
             CommandGroup(after: .textEditing) {
@@ -44,6 +43,7 @@ struct CodexerApp: App {
         Settings {
             SettingsView()
                 .environmentObject(model)
+                .environmentObject(updater)
         }
         .defaultSize(width: 840, height: 600)
         .windowStyle(.hiddenTitleBar)

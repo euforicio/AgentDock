@@ -8,6 +8,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 HELPER_BINARY="$APP_BUNDLE/Contents/Resources/AgentDockShortcutLauncher"
+SPARKLE_FRAMEWORK="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
 ICON_FILE="$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 LICENSE_FILE="$APP_BUNDLE/Contents/Resources/LICENSE.txt"
 NOTICES_FILE="$APP_BUNDLE/Contents/Resources/THIRD_PARTY_NOTICES.md"
@@ -50,6 +51,11 @@ require_dir "$APP_BUNDLE"
 require_file "$INFO_PLIST"
 require_file "$APP_BINARY"
 require_file "$HELPER_BINARY"
+require_dir "$SPARKLE_FRAMEWORK"
+require_file "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+require_file "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
+require_file "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer"
+require_file "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader"
 require_file "$ICON_FILE"
 require_file "$LICENSE_FILE"
 require_file "$NOTICES_FILE"
@@ -62,6 +68,7 @@ require_file "$LICENSES_DIR/Highlightr-MIT.txt"
 require_file "$LICENSES_DIR/highlight.js-BSD-3-Clause.txt"
 require_file "$LICENSES_DIR/RichText-MIT.txt"
 require_file "$LICENSES_DIR/swift-cmark-COPYING.txt"
+require_file "$LICENSES_DIR/Sparkle-MIT.txt"
 
 NOTARY_VALUES_SET=0
 [[ -n "$NOTARY_KEY_PATH" ]] && NOTARY_VALUES_SET=$((NOTARY_VALUES_SET + 1))
@@ -78,13 +85,29 @@ fi
 PLIST_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")"
 PLIST_ICON="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO_PLIST")"
 PLIST_MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST")"
+PLIST_FEED_URL="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO_PLIST")"
+PLIST_PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO_PLIST")"
 
 [[ "$PLIST_BUNDLE_ID" == "dev.euforic.agentdock" ]] || fail "unexpected bundle id: $PLIST_BUNDLE_ID"
 [[ "$PLIST_ICON" == "AppIcon" ]] || fail "unexpected icon file: $PLIST_ICON"
 [[ "$PLIST_MIN_OS" == "26.0" ]] || fail "unexpected minimum macOS version: $PLIST_MIN_OS"
+[[ "$PLIST_FEED_URL" == "https://euforicio.github.io/AgentDock/appcast.xml" ]] \
+  || fail "unexpected Sparkle feed URL: $PLIST_FEED_URL"
+if [[ -n "$SIGNING_IDENTITY" && "$SIGNING_IDENTITY" != "-" ]]; then
+  [[ -n "$PLIST_PUBLIC_KEY" ]] || fail "production package is missing SUPublicEDKey"
+fi
 
 file "$APP_BINARY" | grep -q "Mach-O 64-bit executable arm64" || fail "$APP_BINARY is not an arm64 executable"
 file "$HELPER_BINARY" | grep -q "Mach-O 64-bit executable arm64" || fail "$HELPER_BINARY is not an arm64 executable"
+file "$SPARKLE_FRAMEWORK/Versions/B/Sparkle" | grep -q "Mach-O universal binary" \
+  || fail "Sparkle.framework is not the expected universal framework"
+
+/usr/bin/codesign --verify --strict --verbose=2 \
+  "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Installer.xpc"
+/usr/bin/codesign --verify --strict --verbose=2 \
+  "$SPARKLE_FRAMEWORK/Versions/B/XPCServices/Downloader.xpc"
+/usr/bin/codesign --verify --strict --verbose=2 "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
+/usr/bin/codesign --verify --strict --verbose=2 "$SPARKLE_FRAMEWORK"
 
 rm -rf "$STAGING_DIR" "$DMG_STAGING_DIR" "$ZIP_PATH" "$DMG_PATH"
 mkdir -p "$STAGING_DIR"
@@ -97,17 +120,14 @@ mkdir -p "$STAGING_DIR"
 
 create_zip() {
   /bin/rm -f "$ZIP_PATH"
-  (
-    cd "$DIST_DIR"
-    COPYFILE_DISABLE=1 /usr/bin/ditto -c -k \
-      --keepParent \
-      --norsrc \
-      --noextattr \
-      --noqtn \
-      --noacl \
-      "$RELEASE_NAME" \
-      "$ZIP_PATH"
-  )
+  COPYFILE_DISABLE=1 /usr/bin/ditto -c -k \
+    --keepParent \
+    --norsrc \
+    --noextattr \
+    --noqtn \
+    --noacl \
+    "$STAGING_DIR/$APP_NAME.app" \
+    "$ZIP_PATH"
 }
 
 notarytool() {

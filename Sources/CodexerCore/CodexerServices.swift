@@ -52,6 +52,11 @@ public protocol ShortcutManaging: Sendable {
     func installShortcut(for profile: CodexProfile, codexAppURL: URL) throws
     func removeShortcut(for profile: CodexProfile) throws
     func shortcutExists(for profile: CodexProfile) -> Bool
+    func shortcutNeedsRefresh(for profile: CodexProfile) -> Bool
+}
+
+public extension ShortcutManaging {
+    func shortcutNeedsRefresh(for _: CodexProfile) -> Bool { false }
 }
 
 extension ShortcutInstaller: ShortcutManaging {}

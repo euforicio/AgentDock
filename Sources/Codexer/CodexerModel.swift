@@ -139,6 +139,7 @@ final class CodexerModel: ObservableObject {
                 self.appURLs = selection.urls
                 self.errorMessage = selection.errorMessages.first
                 self.reload()
+                self.refreshOutdatedShortcuts()
                 self.configureProfileActivityRefresh()
                 await self.refreshInstanceStatuses()
             case let .failure(error):
@@ -1115,6 +1116,36 @@ final class CodexerModel: ObservableObject {
 
     func shortcutExists(for profile: CodexProfile) -> Bool {
         installedShortcutProfileIDs.contains(profile.id)
+    }
+
+    private func refreshOutdatedShortcuts() {
+        let candidates = profiles.filter {
+            shortcutInstaller.shortcutExists(for: $0)
+                && shortcutInstaller.shortcutNeedsRefresh(for: $0)
+        }
+        guard !candidates.isEmpty else { return }
+        let installer = shortcutInstaller
+        let selectedAppURLs = appURLs
+        Task { [weak self] in
+            let failures = await Task.detached(priority: .utility) {
+                var messages: [String] = []
+                for profile in candidates {
+                    do {
+                        let appURL = selectedAppURLs[profile.product]
+                            ?? DesktopAppRegistry.descriptor(for: profile.product).defaultAppURL
+                        try installer.installShortcut(for: profile, codexAppURL: appURL)
+                    } catch {
+                        messages.append("\(profile.name): \(error.localizedDescription)")
+                    }
+                }
+                return messages
+            }.value
+            guard let self else { return }
+            installedShortcutProfileIDs.formUnion(candidates.map(\.id))
+            if let firstFailure = failures.first {
+                errorMessage = "AgentDock updated, but a profile shortcut could not be refreshed: \(firstFailure)"
+            }
+        }
     }
 
     private func present(_ error: Error) {

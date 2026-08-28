@@ -67,6 +67,13 @@ credentials, removes temporary keychains and key files, rejects filesystem
 metadata sidecars and build paths, and publishes checksums for the notarized
 artifacts.
 
+Sparkle updates require HTTPS, a Developer ID signature, notarization, and an
+Ed25519 signature. The public verification key is embedded in AgentDock. The
+private key exists only as the environment-protected
+`SPARKLE_PRIVATE_ED_KEY` GitHub Actions secret and is streamed to Sparkle's
+tool over standard input. Release assets are published before the signed
+appcast, so a client cannot discover an enclosure that is not yet available.
+
 ## Reporting a Vulnerability
 
 Follow the [security policy](../SECURITY.md). Use a private GitHub security

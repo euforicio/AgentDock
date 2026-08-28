@@ -17,7 +17,11 @@ final class ShortcutInstallerTests: XCTestCase {
         let profile = CodexProfile(name: "Work Account", slug: "work-account", rootDirectory: root)
         let codexApp = URL(fileURLWithPath: "/Applications/Codex.app")
         let helper = try makeHelper()
-        let installer = ShortcutInstaller(fileManager: .default, helperExecutableURL: helper)
+        let installer = ShortcutInstaller(
+            fileManager: .default,
+            helperExecutableURL: helper,
+            helperVersion: "42"
+        )
 
         try installer.installShortcut(for: profile, codexAppURL: codexApp)
 
@@ -47,6 +51,7 @@ final class ShortcutInstallerTests: XCTestCase {
             "dev.euforic.agentdock.profile.codex.work-account"
         )
         XCTAssertEqual(plist["CFBundleDisplayName"] as? String, "Work Account")
+        XCTAssertEqual(plist["CFBundleVersion"] as? String, "42")
     }
 
     func testRemoveShortcutDeletesOnlyShortcutBundle() throws {
@@ -119,6 +124,43 @@ final class ShortcutInstallerTests: XCTestCase {
             codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app")
         ))
         XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "keep")
+    }
+
+    func testOlderShortcutIsDetectedAndRebuiltWithoutChangingProfileIdentity() throws {
+        let profile = CodexProfile(name: "Stable", slug: "stable", rootDirectory: root)
+        let helper = try makeHelper()
+        let oldInstaller = ShortcutInstaller(
+            fileManager: .default,
+            helperExecutableURL: helper,
+            helperVersion: "10"
+        )
+        try oldInstaller.installShortcut(
+            for: profile,
+            codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app")
+        )
+
+        let currentInstaller = ShortcutInstaller(
+            fileManager: .default,
+            helperExecutableURL: helper,
+            helperVersion: "11"
+        )
+        XCTAssertTrue(currentInstaller.shortcutNeedsRefresh(for: profile))
+
+        try currentInstaller.installShortcut(
+            for: profile,
+            codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app")
+        )
+
+        XCTAssertFalse(currentInstaller.shortcutNeedsRefresh(for: profile))
+        let configURL = profile.shortcutPath
+            .appendingPathComponent("Contents/Resources/ShortcutConfig.plist")
+        let config = try PropertyListDecoder().decode(
+            IsolatedCodexLaunchConfiguration.self,
+            from: Data(contentsOf: configURL)
+        )
+        XCTAssertEqual(config.profileID, profile.id)
+        XCTAssertEqual(config.profileSlug, profile.slug)
+        XCTAssertEqual(config.codexHomePath, profile.codexHomePath.path)
     }
 
     private func makeHelper() throws -> URL {

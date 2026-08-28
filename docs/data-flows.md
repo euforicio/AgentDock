@@ -69,14 +69,21 @@ disappearing.
 
 ## Release Artifacts
 
-1. The [release workflow](../.github/workflows/release.yml) runs the full Swift
-   test suite.
-2. A production app is built with hardened runtime and a Developer ID
+1. A `vMAJOR.MINOR.PATCH` tag starts the only
+   [release workflow](../.github/workflows/release.yml); branches, pull requests,
+   schedules, and manual dispatches cannot start it.
+2. The workflow runs the full Swift test suite.
+3. A production app is built with hardened runtime and a Developer ID
    signature.
-3. The app and DMG are submitted to Apple notarization and stapled.
-4. Gatekeeper, code-signature, DMG integrity, ZIP sidecar, and build-path privacy
+4. Sparkle.framework, its updater helper, and its XPC services are signed from
+   the inside out before the outer app is signed.
+5. The app and DMG are submitted to Apple notarization and stapled.
+6. Gatekeeper, code-signature, DMG integrity, ZIP sidecar, and build-path privacy
    checks run before publication.
-5. GitHub Releases receives the ZIP, DMG, and SHA-256 checksum file using
+7. GitHub Releases receives the ZIP, DMG, and SHA-256 checksum file using
    [package_app.sh](../script/package_app.sh).
+8. Only after the immutable release ZIP exists, Sparkle's `generate_appcast`
+   signs an enclosure pointing at that tagged asset. The signed appcast is the
+   final publication, on the `gh-pages` branch.
 
 No release credential is stored in the repository or packaged artifact.

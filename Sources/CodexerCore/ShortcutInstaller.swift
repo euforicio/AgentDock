@@ -7,10 +7,18 @@ import AppKit
 public final class ShortcutInstaller: @unchecked Sendable {
     private let fileManager: FileManager
     private let helperExecutableURL: URL?
+    private let helperVersion: String
 
-    public init(fileManager: FileManager = .default, helperExecutableURL: URL? = nil) {
+    public init(
+        fileManager: FileManager = .default,
+        helperExecutableURL: URL? = nil,
+        helperVersion: String? = nil
+    ) {
         self.fileManager = fileManager
         self.helperExecutableURL = helperExecutableURL
+        self.helperVersion = helperVersion
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? "1"
     }
 
     public func installShortcut(for profile: CodexProfile, codexAppURL: URL) throws {
@@ -64,6 +72,20 @@ public final class ShortcutInstaller: @unchecked Sendable {
         fileManager.fileExists(atPath: profile.shortcutPath.path)
     }
 
+    public func shortcutNeedsRefresh(for profile: CodexProfile) -> Bool {
+        guard shortcutExists(for: profile) else { return false }
+        let infoPlistURL = profile.shortcutPath.appendingPathComponent("Contents/Info.plist")
+        guard
+            let data = try? Data(contentsOf: infoPlistURL, options: .mappedIfSafe),
+            let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+                as? [String: Any],
+            let installedVersion = plist["CFBundleVersion"] as? String
+        else {
+            return true
+        }
+        return installedVersion.compare(helperVersion, options: .numeric) == .orderedAscending
+    }
+
     private func resolveHelperExecutable() throws -> URL {
         if let helperExecutableURL {
             return helperExecutableURL
@@ -115,9 +137,9 @@ public final class ShortcutInstaller: @unchecked Sendable {
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-            <string>1.0</string>
+            <string>\(xmlEscaped(helperVersion))</string>
             <key>CFBundleVersion</key>
-            <string>1</string>
+            <string>\(xmlEscaped(helperVersion))</string>
             <key>LSMinimumSystemVersion</key>
             <string>26.0</string>
             <key>NSHighResolutionCapable</key>

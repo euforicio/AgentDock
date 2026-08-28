@@ -14,6 +14,11 @@ or conversations change. See
 [CodexerModel.swift](../Sources/Codexer/CodexerModel.swift) and
 [ChatsView.swift](../Sources/Codexer/ChatsView.swift).
 
+[`AppUpdater`](../Sources/Codexer/AppUpdater.swift) owns the single Sparkle 2
+`SPUStandardUpdaterController`. Sparkle persists the user's automatic-check
+and automatic-download preferences; AgentDock does not create a parallel
+updater preference store.
+
 ### Core
 
 [Sources/CodexerCore](../Sources/CodexerCore) owns the security-sensitive boundaries:
@@ -49,6 +54,10 @@ discovery, indexing, or storage. Its public model is in
 profile shortcuts. The helper reads a validated profile configuration and
 delegates to the same core launch rules used by the main app through
 [ShortcutLauncherRunner.swift](../Sources/CodexerCore/ShortcutLauncherRunner.swift).
+After an AgentDock update, installed shortcuts with an older embedded helper
+build are rebuilt through `ShortcutInstaller`'s existing locked, atomic path.
+Profile identifiers, ownership markers, configurations, sessions, and other
+managed data are not migrated or replaced.
 
 ## Isolation Model
 

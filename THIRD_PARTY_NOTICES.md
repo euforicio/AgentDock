@@ -13,6 +13,7 @@ bundles include the complete license texts under
 | [highlight.js](https://github.com/highlightjs/highlight.js) | 11.11.1 | BSD 3-Clause |
 | [RichText](https://github.com/LiYanan2004/RichText) | 1.0.0 | MIT |
 | [swift-cmark](https://github.com/swiftlang/swift-cmark) | 0.8.0 | BSD-style and embedded component notices |
+| [Sparkle](https://github.com/sparkle-project/Sparkle) | 2.9.6 | MIT |
 
 Dependency versions are pinned in [Package.resolved](Package.resolved). This
 file is informational and does not replace the complete license texts.

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: CodexerModel
+    @EnvironmentObject private var updater: AppUpdater
     @State private var section: SettingsSection = .general
 
     var body: some View {
@@ -102,6 +103,27 @@ struct SettingsView: View {
                 Toggle("", isOn: showStatusBinding).labelsHidden()
             }
 
+            SettingsSectionHeader("Updates")
+            SettingsRow("Check for updates automatically") {
+                Toggle("", isOn: automaticChecksBinding)
+                    .labelsHidden()
+                    .disabled(!updater.isConfigured)
+            }
+            SettingsRow("Download and install updates automatically") {
+                Toggle("", isOn: automaticDownloadsBinding)
+                    .labelsHidden()
+                    .disabled(!updater.isConfigured || !updater.automaticallyChecksForUpdates)
+            }
+            Text(
+                updater.isConfigured
+                    ? "Update preferences are stored by Sparkle. Automatic installation completes when AgentDock can safely relaunch."
+                    : "Automatic updates are unavailable in this development build."
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
             SettingsSectionHeader("Provider Apps")
             ForEach(DesktopProduct.allCases) { product in
                 ProviderSettingsRow(product: product)
@@ -182,13 +204,11 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("View Latest Release…") {
-                    guard let url = URL(string: "https://github.com/euforicio/AgentDock/releases/latest") else {
-                        return
-                    }
-                    NSWorkspace.shared.open(url)
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
                 }
                 .controlSize(.regular)
+                .disabled(!updater.isConfigured)
             }
             .padding(.vertical, 10)
         }
@@ -225,6 +245,20 @@ struct SettingsView: View {
 
     private var showStatusBinding: Binding<Bool> {
         Binding(get: { model.preferences.showStatusInProfileList }, set: { model.preferences.showStatusInProfileList = $0 })
+    }
+
+    private var automaticChecksBinding: Binding<Bool> {
+        Binding(
+            get: { updater.automaticallyChecksForUpdates },
+            set: { updater.setAutomaticallyChecksForUpdates($0) }
+        )
+    }
+
+    private var automaticDownloadsBinding: Binding<Bool> {
+        Binding(
+            get: { updater.automaticallyDownloadsUpdates },
+            set: { updater.setAutomaticallyDownloadsUpdates($0) }
+        )
     }
 }
 
