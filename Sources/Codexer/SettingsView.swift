@@ -151,9 +151,19 @@ struct SettingsView: View {
                 .disabled(!updater.isConfigured)
             }
             SettingsRow("Check for updates automatically") {
-                Toggle("", isOn: automaticChecksBinding)
+                HStack(spacing: 10) {
+                    Toggle("", isOn: automaticChecksBinding)
+                        .labelsHidden()
+                    Picker("Update Check Frequency", selection: updateCheckFrequencyBinding) {
+                        ForEach(AppUpdateCheckFrequency.allCases) { frequency in
+                            Text(frequency.displayName).tag(frequency)
+                        }
+                    }
                     .labelsHidden()
-                    .disabled(!updater.isConfigured)
+                    .frame(width: 150)
+                    .disabled(!updater.automaticallyChecksForUpdates)
+                }
+                .disabled(!updater.isConfigured)
             }
             SettingsRow("Download and install updates automatically") {
                 Toggle("", isOn: automaticDownloadsBinding)
@@ -361,6 +371,13 @@ struct SettingsView: View {
         Binding(
             get: { updater.automaticallyDownloadsUpdates },
             set: { updater.setAutomaticallyDownloadsUpdates($0) }
+        )
+    }
+
+    private var updateCheckFrequencyBinding: Binding<AppUpdateCheckFrequency> {
+        Binding(
+            get: { updater.updateCheckFrequency },
+            set: { updater.setUpdateCheckFrequency($0) }
         )
     }
 

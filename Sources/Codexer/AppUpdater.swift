@@ -3,6 +3,30 @@ import Foundation
 import CodexerCore
 import Sparkle
 
+enum AppUpdateCheckFrequency: TimeInterval, CaseIterable, Identifiable {
+    case hourly = 3_600
+    case everySixHours = 21_600
+    case daily = 86_400
+    case weekly = 604_800
+
+    var id: TimeInterval { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .hourly: "Hourly"
+        case .everySixHours: "Every 6 Hours"
+        case .daily: "Daily"
+        case .weekly: "Weekly"
+        }
+    }
+
+    static func closest(to interval: TimeInterval) -> Self {
+        allCases.min { lhs, rhs in
+            abs(lhs.rawValue - interval) < abs(rhs.rawValue - interval)
+        } ?? .hourly
+    }
+}
+
 enum AppUpdatePresentation: Equatable {
     case hidden
     case available(version: String)
@@ -223,6 +247,10 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
         isConfigured && updater.automaticallyDownloadsUpdates
     }
 
+    var updateCheckFrequency: AppUpdateCheckFrequency {
+        isConfigured ? .closest(to: updater.updateCheckInterval) : .hourly
+    }
+
     func checkForUpdates() {
         guard isConfigured else { return }
         ProductAnalytics.shared.capture(AnalyticsEvent(
@@ -263,6 +291,16 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updatePreferenceChanged), .trigger(.settings), .enabled(enabled)]
+        ))
+    }
+
+    func setUpdateCheckFrequency(_ frequency: AppUpdateCheckFrequency) {
+        guard isConfigured else { return }
+        objectWillChange.send()
+        updater.updateCheckInterval = frequency.rawValue
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .updateLifecycle,
+            [.action(.updatePreferenceChanged), .trigger(.settings)]
         ))
     }
 
