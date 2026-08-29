@@ -56,6 +56,7 @@ final class CodexerModel: ObservableObject {
     @Published private(set) var officialClaudeStats = ProfileStats.empty
     @Published private(set) var officialStatsLoading = false
     @Published private(set) var officialCodexRateLimits: ProfileRateLimits?
+    @Published private(set) var officialClaudeRateLimits: ProfileRateLimits?
     @Published private(set) var profileInstanceStatuses: [CodexProfile.ID: CodexInstanceStatus] = [:]
     @Published private(set) var stockInstanceStatuses: [DesktopProduct: CodexInstanceStatus] = [:]
     @Published private(set) var installedShortcutProfileIDs: Set<CodexProfile.ID> = []
@@ -68,6 +69,7 @@ final class CodexerModel: ObservableObject {
     private let shortcutInstaller: any ShortcutManaging
     private let statsScanner: any ProfileStatsScanning
     private let rateLimitClient: any ProfileRateLimitFetching
+    private let claudeUsageClient: any ClaudeUsageFetching
     private let chatScanner: LocalChatScanner
     private let preferencesStore: AgentDockPreferencesStore
     private let appPathKeyPrefix = "AgentDock.desktopAppPath"
@@ -105,6 +107,7 @@ final class CodexerModel: ObservableObject {
         shortcutInstaller = ShortcutInstaller()
         statsScanner = ProfileStatsScanner()
         rateLimitClient = AppServerRateLimitClient()
+        claudeUsageClient = ClaudeUsageClient()
         allowsAutomaticRefresh = true
         let storedPaths: [DesktopProduct: String?] = [
             .codex: UserDefaults.standard.string(
@@ -169,6 +172,7 @@ final class CodexerModel: ObservableObject {
         shortcutInstaller: any ShortcutManaging = ShortcutInstaller(),
         statsScanner: any ProfileStatsScanning = ProfileStatsScanner(),
         rateLimitClient: any ProfileRateLimitFetching = AppServerRateLimitClient(),
+        claudeUsageClient: any ClaudeUsageFetching = ClaudeUsageClient(),
         preferencesStore: AgentDockPreferencesStore = AgentDockPreferencesStore(),
         chatScanner: LocalChatScanner = LocalChatScanner(),
         startMonitoring: Bool = false
@@ -182,6 +186,7 @@ final class CodexerModel: ObservableObject {
         self.shortcutInstaller = shortcutInstaller
         self.statsScanner = statsScanner
         self.rateLimitClient = rateLimitClient
+        self.claudeUsageClient = claudeUsageClient
         allowsAutomaticRefresh = startMonitoring
         reload()
         if startMonitoring {
@@ -326,11 +331,12 @@ final class CodexerModel: ObservableObject {
         busyProfileIDs.contains(profile.id)
     }
 
-    func refreshStats() {
+    func refreshStats(allowCredentialInteraction: Bool = false) {
         refreshStats(for: profiles, replaceAll: true)
         refreshRateLimits(
-            for: profiles.filter { $0.product == .codex },
-            replaceAll: true
+            for: profiles,
+            replaceAll: true,
+            allowCredentialInteraction: allowCredentialInteraction
         )
     }
 
@@ -340,7 +346,7 @@ final class CodexerModel: ObservableObject {
 
     func refreshRateLimits() {
         refreshRateLimits(
-            for: profiles.filter { $0.product == .codex },
+            for: profiles,
             replaceAll: true
         )
     }
@@ -418,13 +424,20 @@ final class CodexerModel: ObservableObject {
         }
     }
 
-    private func refreshRateLimits(for profiles: [CodexProfile], replaceAll: Bool) {
+    private func refreshRateLimits(
+        for profiles: [CodexProfile],
+        replaceAll: Bool,
+        allowCredentialInteraction: Bool = false
+    ) {
         rateLimitRefreshTask?.cancel()
         rateLimitGeneration += 1
         let generation = rateLimitGeneration
         let client = rateLimitClient
+        let claudeClient = claudeUsageClient
         let appURL = codexAppURL
         let officialHomeURL = officialCodexHomeURL
+        let officialClaudeCodeHomeURL = officialClaudeCodeHomeURL
+        let officialClaudeUserDataURL = officialClaudeUserDataURL
 
         rateLimitRefreshTask = Task { [weak self] in
             let officialWorker = Task.detached(priority: .utility) {
@@ -432,6 +445,15 @@ final class CodexerModel: ObservableObject {
                     ? client.fetchRateLimits(
                         codexHomeURL: officialHomeURL,
                         codexAppURL: appURL
+                    )
+                    : nil
+            }
+            let officialClaudeWorker = Task {
+                replaceAll
+                    ? await claudeClient.fetchOfficialUsage(
+                        claudeCodeHomeURL: officialClaudeCodeHomeURL,
+                        claudeUserDataURL: officialClaudeUserDataURL,
+                        allowKeychainInteraction: allowCredentialInteraction
                     )
                     : nil
             }
@@ -443,7 +465,16 @@ final class CodexerModel: ObservableObject {
                 for _ in 0..<min(4, profiles.count) {
                     if let profile = iterator.next() {
                         group.addTask {
-                            (profile.id, client.fetchRateLimits(for: profile, codexAppURL: appURL))
+                            let limits = switch profile.product {
+                            case .codex:
+                                client.fetchRateLimits(for: profile, codexAppURL: appURL)
+                            case .claude:
+                                await claudeClient.fetchManagedUsage(
+                                    claudeUserDataURL: profile.claudeUserDataPath,
+                                    allowKeychainInteraction: allowCredentialInteraction
+                                )
+                            }
+                            return (profile.id, limits)
                         }
                     }
                 }
@@ -457,18 +488,29 @@ final class CodexerModel: ObservableObject {
                     collected[id] = limits
                     if let profile = iterator.next() {
                         group.addTask {
-                            (profile.id, client.fetchRateLimits(for: profile, codexAppURL: appURL))
+                            let limits = switch profile.product {
+                            case .codex:
+                                client.fetchRateLimits(for: profile, codexAppURL: appURL)
+                            case .claude:
+                                await claudeClient.fetchManagedUsage(
+                                    claudeUserDataURL: profile.claudeUserDataPath,
+                                    allowKeychainInteraction: allowCredentialInteraction
+                                )
+                            }
+                            return (profile.id, limits)
                         }
                     }
                 }
                 return collected
             }
             let official = await officialWorker.value
+            let officialClaude = await officialClaudeWorker.value
 
             guard !Task.isCancelled, let self, self.rateLimitGeneration == generation else { return }
             if replaceAll {
                 self.profileRateLimits = results
                 self.officialCodexRateLimits = official
+                self.officialClaudeRateLimits = officialClaude
             } else {
                 self.profileRateLimits.merge(results) { _, new in new }
             }
@@ -667,9 +709,7 @@ final class CodexerModel: ObservableObject {
                 reload(refreshData: false)
                 if let updated = store.profiles.first(where: { $0.id == profile.id }) {
                     refreshStats(for: updated)
-                    if updated.product == .codex {
-                        refreshRateLimits(for: [updated], replaceAll: false)
-                    }
+                    refreshRateLimits(for: [updated], replaceAll: false)
                 }
                 errorMessage = nil
                 ProductAnalytics.shared.capture(AnalyticsEvent(

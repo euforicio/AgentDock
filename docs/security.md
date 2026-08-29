@@ -63,10 +63,16 @@ random identifier. The public project
 token is release configuration, not a credential; no private PostHog key
 belongs in the app. See the [complete catalog](analytics.md).
 
-Claude usage summaries do not read or copy OAuth tokens, Keychain entries, or
-browser session state. Account names remain the user-assigned AgentDock profile
-labels; AgentDock does not infer an identity or subscription tier from private
-browser storage.
+Local Claude usage summaries do not require credentials. Live subscription
+limits are an explicit provider-access boundary: AgentDock reads Claude Code or
+Claude Desktop OAuth access tokens and the active Desktop organization from
+provider-owned Keychain and local state, then calls Anthropic's OAuth profile
+and usage endpoints. Tokens are held only for the request; AgentDock never
+copies them into its own storage, refreshes or rotates them, includes them in
+analytics, or logs them. Background reads forbid Keychain interaction; a manual
+refresh may show the system access prompt. Managed profiles resolve credentials
+only from their own Desktop user-data roots, and every response is verified
+against its account and organization before display.
 
 ## Repository and Release Hygiene
 

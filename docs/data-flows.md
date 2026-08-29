@@ -55,13 +55,30 @@ profile path.
 7. Additional pages append in source order while stable IDs prevent duplicate
    rows and stale chat switches are suppressed.
 
-For managed Claude profiles, the same validated Cowork audit sources also feed
-an in-memory usage summary. Assistant token records are deduplicated by their
-message/request identity before aggregation, scans are byte-bounded and cached
-by source size and modification time, and model totals remain profile-scoped.
+For official and managed Claude sources, the same validated Cowork audit
+sources also feed an in-memory usage summary. Assistant token records are
+deduplicated by their message/request identity before aggregation, scans are
+byte-bounded and cached by source size and modification time, and model totals
+remain source-scoped. The overview uses the same usage and activity components
+for both source types and lists the official installation beside managed
+accounts for quick comparison and selection.
 Claude `rate_limit_event` records contribute only their latest observed status,
 bucket, reset time, and optional utilization. Missing utilization stays missing;
 AgentDock does not carry an older percentage into a newer limit window.
+
+Live Claude quota refresh is a separate flow:
+
+1. Official Claude prefers a live-capable Claude Code login and falls back to
+   the official Desktop OAuth cache. Managed profiles use only their own
+   Desktop user-data root.
+2. Background refresh reads Keychain without interaction. Manual refresh may
+   request access to Claude Safe Storage.
+3. The active account and organization are resolved locally and verified with
+   Anthropic before the usage response is assigned to a source.
+4. Access tokens remain in memory and are never copied, refreshed, persisted,
+   or logged by AgentDock.
+5. HTTP 429 responses create a credential-scoped cooldown and retain only the
+   last successful in-memory snapshot for that same login.
 
 Full transcript bodies and tool output are not stored in the summary index.
 Malformed, partial, and unsupported events remain visible instead of silently

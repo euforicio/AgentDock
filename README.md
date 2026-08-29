@@ -38,7 +38,7 @@ and can have its own Dock-pinnable shortcut.
 - Browse supported local chat histories with safe links, tables, selectable
   prose, syntax-highlighted code, and bounded tool output.
 - View supported local activity, storage, usage-limit, and lifecycle
-  information.
+  information for official installations and managed profiles.
 - Verify official app identity and code signatures before managed operations.
 - Preserve profile data by default when removing a profile from the app.
 
@@ -96,13 +96,16 @@ Local transcript support is source-dependent:
 - Codex uses supported local databases and session JSONL fallbacks.
 - Claude uses supported local Cowork/agent-session data. The Official Claude
   view can also include the lightweight Claude Code history index and matching
-  local session files. Managed Claude profiles aggregate source-backed session,
-  model, and token activity from their own Cowork audit history. The latest
-  locally emitted rate-limit signal is shown when present; it is not presented
-  as a complete or live subscription quota snapshot.
+  local session files. Official and managed Claude sources expose the same
+  source-backed session, model, and token summaries. When a signed-in OAuth
+  credential grants profile access, AgentDock also reads Anthropic's live
+  session, weekly, model-scoped, reset, and extra-usage status. The cross-source
+  card keeps the official installation visible alongside every managed account.
+  Local rate-limit events remain a clearly separate last-observed fallback.
 - Ordinary synced claude.ai web chats are unavailable because Claude Desktop
-  does not expose a stable local transcript contract. AgentDock does not scrape
-  cookies or browser caches.
+  does not expose a stable local transcript contract. AgentDock reads only the
+  provider-owned OAuth cache and active-organization cookie required to resolve
+  live usage; it does not index ordinary web-chat content.
 
 Indexes contain bounded list metadata, not full transcript bodies or absolute
 working directories. See [Security and privacy](docs/security.md),

@@ -319,7 +319,7 @@ struct ContentView: View {
                 .countBucket(.init(model.profiles.count))
             ]
         ))
-        model.refreshStats()
+        model.refreshStats(allowCredentialInteraction: true)
         model.refreshChats()
     }
 
