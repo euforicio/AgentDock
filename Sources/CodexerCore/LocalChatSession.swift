@@ -6,6 +6,42 @@ public enum LocalChatAvailability: Equatable, Sendable {
     case unavailable(String)
 }
 
+private struct ClaudeUsageSummary: Sendable {
+    let totalTokens: Int
+    let latestUsageLimit: UsageLimitSignal?
+}
+
+private final class ClaudeUsageCache: @unchecked Sendable {
+    private struct Entry {
+        let size: UInt64
+        let modifiedAt: Date
+        let summary: ClaudeUsageSummary
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+
+    func value(for path: String, size: UInt64, modifiedAt: Date) -> ClaudeUsageSummary? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[path], entry.size == size,
+              abs(entry.modifiedAt.timeIntervalSince(modifiedAt)) < 0.002
+        else {
+            return nil
+        }
+        return entry.summary
+    }
+
+    func store(_ summary: ClaudeUsageSummary, for path: String, size: UInt64, modifiedAt: Date) {
+        lock.lock()
+        defer { lock.unlock() }
+        if entries.count >= 10_000, entries[path] == nil {
+            entries.removeAll(keepingCapacity: true)
+        }
+        entries[path] = Entry(size: size, modifiedAt: modifiedAt, summary: summary)
+    }
+}
+
 public enum LocalChatRole: String, Codable, Sendable {
     case user
     case assistant
@@ -151,6 +187,7 @@ public struct LocalChatSession: Identifiable, Hashable, Sendable {
     public let startedAt: Date
     public let updatedAt: Date
     public let tokenCount: Int?
+    public let latestUsageLimit: UsageLimitSignal?
     public let status: String
     public let sourceURL: URL
     let sourceRootURL: URL
@@ -175,6 +212,7 @@ public struct LocalChatSession: Identifiable, Hashable, Sendable {
         startedAt: Date,
         updatedAt: Date,
         tokenCount: Int?,
+        latestUsageLimit: UsageLimitSignal? = nil,
         status: String,
         sourceURL: URL,
         sourceRootURL: URL,
@@ -194,6 +232,7 @@ public struct LocalChatSession: Identifiable, Hashable, Sendable {
         self.startedAt = startedAt
         self.updatedAt = updatedAt
         self.tokenCount = tokenCount
+        self.latestUsageLimit = latestUsageLimit
         self.status = status
         self.sourceURL = sourceURL
         self.sourceRootURL = sourceRootURL
@@ -277,7 +316,9 @@ public struct LocalChatScanner: @unchecked Sendable {
     private let maximumRenderableEntryBytes: Int
     private let maximumInventoryFiles: Int
     private let maximumMetadataBytes: Int
+    private let maximumClaudeUsageBytes: Int
     private let indexRootURL: URL
+    private let claudeUsageCache: ClaudeUsageCache
 
     public init(
         fileManager: FileManager = .default,
@@ -288,6 +329,7 @@ public struct LocalChatScanner: @unchecked Sendable {
         maximumRenderableEntryBytes: Int = 2 * 1_024 * 1_024,
         maximumInventoryFiles: Int? = nil,
         maximumMetadataBytes: Int = 16 * 1_024 * 1_024,
+        maximumClaudeUsageBytes: Int = 512 * 1_024 * 1_024,
         indexRootURL: URL? = nil
     ) {
         self.fileManager = fileManager
@@ -302,9 +344,11 @@ public struct LocalChatScanner: @unchecked Sendable {
                 ?? (maximumSessions > 2_500 ? 10_000 : max(1, maximumSessions * 4))
         )
         self.maximumMetadataBytes = max(1, maximumMetadataBytes)
+        self.maximumClaudeUsageBytes = max(1, maximumClaudeUsageBytes)
         self.indexRootURL = indexRootURL
             ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("AgentDock/ChatIndexes", isDirectory: true)
+        claudeUsageCache = ClaudeUsageCache()
     }
 
     public func scan(profile: CodexProfile) -> LocalChatScanResult {
@@ -723,7 +767,8 @@ public struct LocalChatScanner: @unchecked Sendable {
                     branch: nil,
                     startedAt: record.startedAt,
                     updatedAt: record.updatedAt,
-                    tokenCount: nil,
+                    tokenCount: record.tokenCount,
+                    latestUsageLimit: record.latestUsageLimit,
                     status: record.status,
                     sourceURL: record.source.url,
                     sourceRootURL: userDataURL,
@@ -740,10 +785,14 @@ public struct LocalChatScanner: @unchecked Sendable {
     }
 
     private func claudeUserDataInventory(userDataURL: URL) -> ClaudeUserDataInventory {
-        let candidates = claudeMetadataCandidates(userDataURL: userDataURL)
+        let candidates = claudeMetadataCandidates(userDataURL: userDataURL).sorted {
+            if $0.modifiedAt == $1.modifiedAt { return $0.relativePath < $1.relativePath }
+            return $0.modifiedAt > $1.modifiedAt
+        }
         var records: [ClaudeUserDataRecord] = []
         var tokenParts: [String] = []
         var metadataBytes = 0
+        var remainingUsageBytes = maximumClaudeUsageBytes
         for candidate in candidates {
             guard !Task.isCancelled else { break }
             tokenParts.append(
@@ -794,6 +843,13 @@ public struct LocalChatScanner: @unchecked Sendable {
                 ?? Self.claudeDate(object["lastFocusedAt"])
                 ?? source.modifiedAt
             let cwd = (object["cwd"] as? String) ?? (object["originCwd"] as? String)
+            let usage: ClaudeUsageSummary?
+            if source.fileSize <= UInt64(remainingUsageBytes) {
+                remainingUsageBytes -= Int(source.fileSize)
+                usage = claudeUsageSummary(at: source, under: userDataURL)
+            } else {
+                usage = nil
+            }
             records.append(.init(
                 id: id,
                 title: Self.title(from: titleText.isEmpty ? prompt : titleText),
@@ -802,6 +858,8 @@ public struct LocalChatScanner: @unchecked Sendable {
                 repository: Self.safeLastPathComponent(cwd),
                 startedAt: createdAt,
                 updatedAt: max(createdAt, updatedAt),
+                tokenCount: usage?.totalTokens,
+                latestUsageLimit: usage?.latestUsageLimit,
                 status: Self.boolValue(object["isArchived"]) ? "Archived" : "Unknown",
                 source: source
             ))
@@ -914,6 +972,102 @@ public struct LocalChatScanner: @unchecked Sendable {
             modifiedAt: safe.modifiedAt,
             status: "Unknown"
         )
+    }
+
+    private func claudeUsageSummary(
+        at source: SourceFile,
+        under root: URL
+    ) -> ClaudeUsageSummary? {
+        if let cached = claudeUsageCache.value(
+            for: source.url.path,
+            size: source.fileSize,
+            modifiedAt: source.modifiedAt
+        ) {
+            return cached
+        }
+
+        var totalTokens = 0
+        var seenMessageRequests: Set<String> = []
+        var latestUsageLimit: UsageLimitSignal?
+        let usageMarker = Data(#""usage""#.utf8)
+        let rateLimitMarker = Data(#""rate_limit_event""#.utf8)
+        let completed = forEachForwardLine(at: source.url, under: root) { line in
+            guard line.range(of: usageMarker) != nil
+                || line.range(of: rateLimitMarker) != nil
+            else {
+                return true
+            }
+            guard
+                let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                let type = object["type"] as? String
+            else {
+                return true
+            }
+
+            if type == "assistant",
+               let message = object["message"] as? [String: Any],
+               let usage = message["usage"] as? [String: Any]
+            {
+                let messageID = message["id"] as? String
+                let requestID = object["requestId"] as? String
+                let dedupeKey = (messageID == nil && requestID == nil)
+                    ? nil
+                    : "\(messageID ?? ""):\(requestID ?? "")"
+                if dedupeKey.map({ seenMessageRequests.insert($0).inserted }) ?? true {
+                    for key in [
+                        "input_tokens", "cache_read_input_tokens",
+                        "cache_creation_input_tokens", "output_tokens"
+                    ] {
+                        totalTokens = Self.saturatingAdd(
+                            totalTokens,
+                            Self.nonnegativeInt(usage[key])
+                        )
+                    }
+                }
+            }
+
+            if type == "rate_limit_event",
+               let info = object["rate_limit_info"] as? [String: Any],
+               let rawStatus = info["status"] as? String,
+               let status = UsageLimitSignal.Status(rawValue: rawStatus)
+            {
+                let observedAt = Self.date(object["_audit_timestamp"])
+                    ?? Self.date(object["timestamp"])
+                    ?? source.modifiedAt
+                let rawUtilization = (info["utilization"] as? NSNumber)?.doubleValue
+                let usedPercent = rawUtilization.flatMap { value -> Double? in
+                    guard value.isFinite, value >= 0 else { return nil }
+                    let percent = value <= 1 ? value * 100 : value
+                    return percent <= 100 ? percent : nil
+                }
+                let signal = UsageLimitSignal(
+                    status: status,
+                    bucket: Self.cleanMetadata(info["rateLimitType"] as? String),
+                    usedPercent: usedPercent,
+                    resetsAt: Self.claudeDate(info["resetsAt"]),
+                    observedAt: observedAt,
+                    isUsingOverage: info["isUsingOverage"].map(Self.boolValue)
+                )
+                if latestUsageLimit == nil
+                    || observedAt >= (latestUsageLimit?.observedAt ?? .distantPast)
+                {
+                    latestUsageLimit = signal
+                }
+            }
+            return true
+        }
+        guard completed, !Task.isCancelled else { return nil }
+        let summary = ClaudeUsageSummary(
+            totalTokens: totalTokens,
+            latestUsageLimit: latestUsageLimit
+        )
+        claudeUsageCache.store(
+            summary,
+            for: source.url.path,
+            size: source.fileSize,
+            modifiedAt: source.modifiedAt
+        )
+        return summary
     }
 
     private func boundedClaudeUserDataRecords(
@@ -2342,6 +2496,8 @@ public struct LocalChatScanner: @unchecked Sendable {
         let repository: String?
         let startedAt: Date
         let updatedAt: Date
+        let tokenCount: Int?
+        let latestUsageLimit: UsageLimitSignal?
         let status: String
         let source: SourceFile
     }
@@ -2503,6 +2659,16 @@ public struct LocalChatScanner: @unchecked Sendable {
         if let number = raw as? NSNumber { return number.intValue }
         if let string = raw as? String { return Int(string) }
         return nil
+    }
+
+    private static func nonnegativeInt(_ raw: Any?) -> Int {
+        guard !(raw is Bool), let value = intValue(raw), value > 0 else { return 0 }
+        return value
+    }
+
+    private static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : sum
     }
 
     private static func boolValue(_ raw: Any?) -> Bool {

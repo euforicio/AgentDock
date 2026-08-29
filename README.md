@@ -96,7 +96,10 @@ Local transcript support is source-dependent:
 - Codex uses supported local databases and session JSONL fallbacks.
 - Claude uses supported local Cowork/agent-session data. The Official Claude
   view can also include the lightweight Claude Code history index and matching
-  local session files.
+  local session files. Managed Claude profiles aggregate source-backed session,
+  model, and token activity from their own Cowork audit history. The latest
+  locally emitted rate-limit signal is shown when present; it is not presented
+  as a complete or live subscription quota snapshot.
 - Ordinary synced claude.ai web chats are unavailable because Claude Desktop
   does not expose a stable local transcript contract. AgentDock does not scrape
   cookies or browser caches.

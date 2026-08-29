@@ -8,7 +8,6 @@ enum ActivityDestination: String, Identifiable {
   case lastActivity
   case archived
   case sessions
-  case localActivity
 
   var id: Self { self }
 
@@ -19,7 +18,6 @@ enum ActivityDestination: String, Identifiable {
     case .lastActivity: "Latest Activity"
     case .archived: "Archived Sessions"
     case .sessions: "Sessions"
-    case .localActivity: "Local Activity"
     }
   }
 
@@ -30,7 +28,6 @@ enum ActivityDestination: String, Identifiable {
     case .lastActivity: "waveform.path.ecg"
     case .archived: "archivebox"
     case .sessions: "bubble.left.and.bubble.right"
-    case .localActivity: "lock.shield"
     }
   }
 }
@@ -112,8 +109,6 @@ struct ActivityDetailSheet: View {
       activityContent
     case .archived:
       archivedContent
-    case .localActivity:
-      unavailableLocalActivity
     }
   }
 
@@ -236,14 +231,9 @@ struct ActivityDetailSheet: View {
             dismiss()
           }
           .buttonStyle(.bordered)
-          .disabled(product == .claude)
         }
 
-        if product == .claude {
-          Text("Claude Desktop does not expose a supported local transcript format.")
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-        } else if model.chatSessions.isEmpty {
+        if model.chatSessions.isEmpty {
           Text("No readable local conversations are available for this selection.")
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
@@ -299,13 +289,6 @@ struct ActivityDetailSheet: View {
     }
   }
 
-  private var unavailableLocalActivity: some View {
-    ActivityUnavailableState(
-      title: "Local Activity Unavailable",
-      description: "Claude Desktop does not expose a supported local activity or transcript database. Storage and lifecycle information remain available."
-    )
-  }
-
   @ViewBuilder
   private var activityIssues: some View {
     if let issues = snapshot?.issues, !issues.isEmpty {
@@ -356,7 +339,7 @@ struct ActivityDetailSheet: View {
     if let profile {
       return model.stats(for: profile)
     }
-    return product == .codex ? model.officialCodexStats : .empty
+    return product == .codex ? model.officialCodexStats : model.officialClaudeStats
   }
 
   private var codexHomeURL: URL? {

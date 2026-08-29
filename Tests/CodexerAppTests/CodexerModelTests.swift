@@ -777,11 +777,24 @@ private final class SequencedStatsScanner: ProfileStatsScanning, @unchecked Send
     func stats(codexHomeURL _: URL, dataRootURL _: URL, now _: Date) -> ProfileStats {
         .empty
     }
+
+    func stats(
+        claudeUserDataURL _: URL,
+        claudeCodeHomeURL _: URL,
+        dataRootURL _: URL,
+        now _: Date
+    ) -> ProfileStats { .empty }
 }
 
 private struct FixedStatsScanner: ProfileStatsScanning {
     func stats(for _: CodexProfile, now _: Date) -> ProfileStats { .empty }
     func stats(codexHomeURL _: URL, dataRootURL _: URL, now _: Date) -> ProfileStats { .empty }
+    func stats(
+        claudeUserDataURL _: URL,
+        claudeCodeHomeURL _: URL,
+        dataRootURL _: URL,
+        now _: Date
+    ) -> ProfileStats { .empty }
 }
 
 private struct FixedRateLimitClient: ProfileRateLimitFetching {
