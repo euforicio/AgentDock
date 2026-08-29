@@ -533,7 +533,8 @@ final class CodexerModel: ObservableObject {
                     ? await claudeClient.fetchOfficialUsage(
                         claudeCodeHomeURL: officialClaudeCodeHomeURL,
                         claudeUserDataURL: officialClaudeUserDataURL,
-                        allowKeychainInteraction: allowCredentialInteraction
+                        allowKeychainInteraction: allowCredentialInteraction,
+                        forceRefresh: allowCredentialInteraction
                     )
                     : nil
             }
@@ -551,7 +552,8 @@ final class CodexerModel: ObservableObject {
                             case .claude:
                                 await claudeClient.fetchManagedUsage(
                                     claudeUserDataURL: profile.claudeUserDataPath,
-                                    allowKeychainInteraction: allowCredentialInteraction
+                                    allowKeychainInteraction: allowCredentialInteraction,
+                                    forceRefresh: allowCredentialInteraction
                                 )
                             }
                             return (profile.id, limits)
@@ -574,7 +576,8 @@ final class CodexerModel: ObservableObject {
                             case .claude:
                                 await claudeClient.fetchManagedUsage(
                                     claudeUserDataURL: profile.claudeUserDataPath,
-                                    allowKeychainInteraction: allowCredentialInteraction
+                                    allowKeychainInteraction: allowCredentialInteraction,
+                                    forceRefresh: allowCredentialInteraction
                                 )
                             }
                             return (profile.id, limits)

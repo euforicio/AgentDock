@@ -13,7 +13,8 @@ final class ClaudeUsageClientTests: XCTestCase {
                 "Library/Application Support/Claude",
                 isDirectory: true
             ),
-            allowKeychainInteraction: false
+            allowKeychainInteraction: false,
+            forceRefresh: true
         )
 
         XCTAssertNil(limits.errorMessage)
@@ -70,5 +71,26 @@ final class ClaudeUsageClientTests: XCTestCase {
 
     func testRejectsNonObjectResponse() {
         XCTAssertThrowsError(try ClaudeUsageResponseParser.parse(Data("[]".utf8)))
+    }
+
+    func testSuccessfulUsageIsReusableForFiveMinutes() {
+        let fetchedAt = Date(timeIntervalSince1970: 1_000)
+        let limits = ProfileRateLimits(fetchedAt: fetchedAt)
+
+        XCTAssertTrue(ClaudeUsageRefreshPolicy.canReuse(
+            limits,
+            now: fetchedAt.addingTimeInterval(299)
+        ))
+        XCTAssertFalse(ClaudeUsageRefreshPolicy.canReuse(
+            limits,
+            now: fetchedAt.addingTimeInterval(300)
+        ))
+        XCTAssertFalse(ClaudeUsageRefreshPolicy.canReuse(ProfileRateLimits(), now: fetchedAt))
+    }
+
+    func testRateLimitCooldownUsesProviderDelayWithOneMinuteMinimum() {
+        XCTAssertEqual(ClaudeUsageRefreshPolicy.rateLimitCooldown(retryAfter: nil), 300)
+        XCTAssertEqual(ClaudeUsageRefreshPolicy.rateLimitCooldown(retryAfter: 15), 60)
+        XCTAssertEqual(ClaudeUsageRefreshPolicy.rateLimitCooldown(retryAfter: 600), 600)
     }
 }

@@ -8,20 +8,35 @@ public protocol ClaudeUsageFetching: Sendable {
     func fetchOfficialUsage(
         claudeCodeHomeURL: URL,
         claudeUserDataURL: URL,
-        allowKeychainInteraction: Bool
+        allowKeychainInteraction: Bool,
+        forceRefresh: Bool
     ) async -> ProfileRateLimits
 
     func fetchManagedUsage(
         claudeUserDataURL: URL,
-        allowKeychainInteraction: Bool
+        allowKeychainInteraction: Bool,
+        forceRefresh: Bool
     ) async -> ProfileRateLimits
+}
+
+enum ClaudeUsageRefreshPolicy {
+    static let freshnessInterval: TimeInterval = 5 * 60
+    static let failureRetryBackoff: TimeInterval = 60
+    static let defaultRateLimitCooldown: TimeInterval = 5 * 60
+
+    static func canReuse(_ limits: ProfileRateLimits, now: Date) -> Bool {
+        let age = now.timeIntervalSince(limits.fetchedAt)
+        return age >= 0 && age < freshnessInterval
+    }
+
+    static func rateLimitCooldown(retryAfter: TimeInterval?) -> TimeInterval {
+        max(failureRetryBackoff, retryAfter ?? defaultRateLimitCooldown)
+    }
 }
 
 public actor ClaudeUsageClient: ClaudeUsageFetching {
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let profileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
-    private static let defaultCooldown: TimeInterval = 5 * 60
-
     private struct CachedUsage {
         var limits: ProfileRateLimits
         var retryAfter: Date?
@@ -29,6 +44,7 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
 
     private let session: URLSession
     private var cache: [String: CachedUsage] = [:]
+    private var refreshWaiters: [String: [CheckedContinuation<ProfileRateLimits, Never>]] = [:]
 
     public init() {
         let configuration = URLSessionConfiguration.ephemeral
@@ -42,7 +58,8 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
     public func fetchOfficialUsage(
         claudeCodeHomeURL: URL,
         claudeUserDataURL: URL,
-        allowKeychainInteraction: Bool
+        allowKeychainInteraction: Bool,
+        forceRefresh: Bool = false
     ) async -> ProfileRateLimits {
         let reader = ClaudeCredentialReader(allowKeychainInteraction: allowKeychainInteraction)
         let codeCredential = reader.readCodeCredential(homeURL: claudeCodeHomeURL)
@@ -54,20 +71,24 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
         } else {
             reader.readDesktopCredential(userDataURL: claudeUserDataURL) ?? codeCredential
         }
-        return await fetch(credential)
+        return await fetch(credential, forceRefresh: forceRefresh)
     }
 
     public func fetchManagedUsage(
         claudeUserDataURL: URL,
-        allowKeychainInteraction: Bool
+        allowKeychainInteraction: Bool,
+        forceRefresh: Bool = false
     ) async -> ProfileRateLimits {
         let credential = ClaudeCredentialReader(
             allowKeychainInteraction: allowKeychainInteraction
         ).readDesktopCredential(userDataURL: claudeUserDataURL)
-        return await fetch(credential)
+        return await fetch(credential, forceRefresh: forceRefresh)
     }
 
-    private func fetch(_ credential: ClaudeUsageCredential?) async -> ProfileRateLimits {
+    private func fetch(
+        _ credential: ClaudeUsageCredential?,
+        forceRefresh: Bool
+    ) async -> ProfileRateLimits {
         guard let credential else {
             return ProfileRateLimits(
                 errorMessage: "Live usage is unavailable. Open Claude and sign in, then refresh."
@@ -81,7 +102,15 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
         }
 
         let key = credential.cacheKey
-        if let retryAfter = cache[key]?.retryAfter, retryAfter > Date() {
+        let now = Date()
+        if !forceRefresh,
+           let cached = cache[key],
+           cached.retryAfter == nil,
+           ClaudeUsageRefreshPolicy.canReuse(cached.limits, now: now)
+        {
+            return cached.limits
+        }
+        if !forceRefresh, let retryAfter = cache[key]?.retryAfter, retryAfter > now {
             return cachedLimits(
                 for: key,
                 warning: "Live usage is rate limited; showing the last successful update."
@@ -91,6 +120,23 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
             )
         }
 
+        if refreshWaiters[key] != nil {
+            return await withCheckedContinuation { continuation in
+                refreshWaiters[key, default: []].append(continuation)
+            }
+        }
+
+        refreshWaiters[key] = []
+        let limits = await fetchUncached(credential, key: key)
+        let waiters = refreshWaiters.removeValue(forKey: key) ?? []
+        waiters.forEach { $0.resume(returning: limits) }
+        return limits
+    }
+
+    private func fetchUncached(
+        _ credential: ClaudeUsageCredential,
+        key: String
+    ) async -> ProfileRateLimits {
         do {
             if let identity = credential.identity {
                 try await verifyIdentity(identity, accessToken: credential.accessToken)
@@ -98,17 +144,15 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
             let (data, response) = try await request(Self.usageURL, token: credential.accessToken)
             if response.statusCode == 429 {
                 let retryAt = Date().addingTimeInterval(
-                    retryAfter(from: response) ?? Self.defaultCooldown
-                )
-                if var existing = cache[key] {
-                    existing.retryAfter = retryAt
-                    cache[key] = existing
-                } else {
-                    cache[key] = CachedUsage(
-                        limits: ProfileRateLimits(planType: credential.subscriptionType),
-                        retryAfter: retryAt
+                    ClaudeUsageRefreshPolicy.rateLimitCooldown(
+                        retryAfter: retryAfter(from: response)
                     )
-                }
+                )
+                recordFailureCooldown(
+                    for: key,
+                    fallback: ProfileRateLimits(planType: credential.subscriptionType),
+                    retryAt: retryAt
+                )
                 return cachedLimits(
                     for: key,
                     warning: "Live usage is rate limited; showing the last successful update."
@@ -118,7 +162,19 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
                 )
             }
             guard (200..<300).contains(response.statusCode) else {
-                return requestFailure(response.statusCode, credential: credential)
+                let failure = requestFailure(response.statusCode, credential: credential)
+                let retryDelay = response.statusCode == 401 || response.statusCode == 403
+                    ? ClaudeUsageRefreshPolicy.defaultRateLimitCooldown
+                    : ClaudeUsageRefreshPolicy.failureRetryBackoff
+                recordFailureCooldown(
+                    for: key,
+                    fallback: failure,
+                    retryAt: Date().addingTimeInterval(retryDelay)
+                )
+                return cachedLimits(
+                    for: key,
+                    warning: failure.errorMessage ?? "Live usage could not be refreshed."
+                ) ?? failure
             }
             var limits = try ClaudeUsageResponseParser.parse(
                 data,
@@ -127,7 +183,42 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
             limits.fetchedAt = Date()
             cache[key] = CachedUsage(limits: limits, retryAfter: nil)
             return limits
+        } catch ClaudeUsageClientError.rateLimited(let retryAfter) {
+            let retryAt = Date().addingTimeInterval(
+                ClaudeUsageRefreshPolicy.rateLimitCooldown(retryAfter: retryAfter)
+            )
+            recordFailureCooldown(
+                for: key,
+                fallback: ProfileRateLimits(planType: credential.subscriptionType),
+                retryAt: retryAt
+            )
+            return cachedLimits(
+                for: key,
+                warning: "Live usage is rate limited; showing the last successful update."
+            ) ?? ProfileRateLimits(
+                planType: credential.subscriptionType,
+                errorMessage: "Live usage is rate limited. Try again later."
+            )
+        } catch ClaudeUsageClientError.requestFailed(let statusCode) {
+            let failure = requestFailure(statusCode, credential: credential)
+            let retryDelay = statusCode == 401 || statusCode == 403
+                ? ClaudeUsageRefreshPolicy.defaultRateLimitCooldown
+                : ClaudeUsageRefreshPolicy.failureRetryBackoff
+            recordFailureCooldown(
+                for: key,
+                fallback: failure,
+                retryAt: Date().addingTimeInterval(retryDelay)
+            )
+            return cachedLimits(
+                for: key,
+                warning: failure.errorMessage ?? "Live usage could not be refreshed."
+            ) ?? failure
         } catch {
+            recordFailureCooldown(
+                for: key,
+                fallback: ProfileRateLimits(planType: credential.subscriptionType),
+                retryAt: Date().addingTimeInterval(ClaudeUsageRefreshPolicy.failureRetryBackoff)
+            )
             return cachedLimits(
                 for: key,
                 warning: "Live usage could not be refreshed; showing the last successful update."
@@ -138,8 +229,24 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
         }
     }
 
+    private func recordFailureCooldown(
+        for key: String,
+        fallback: ProfileRateLimits,
+        retryAt: Date
+    ) {
+        if var existing = cache[key] {
+            existing.retryAfter = retryAt
+            cache[key] = existing
+        } else {
+            cache[key] = CachedUsage(limits: fallback, retryAfter: retryAt)
+        }
+    }
+
     private func verifyIdentity(_ expected: ClaudeAccountIdentity, accessToken: String) async throws {
         let (data, response) = try await request(Self.profileURL, token: accessToken)
+        if response.statusCode == 429 {
+            throw ClaudeUsageClientError.rateLimited(retryAfter(from: response))
+        }
         guard (200..<300).contains(response.statusCode) else {
             throw ClaudeUsageClientError.requestFailed(response.statusCode)
         }
@@ -640,6 +747,7 @@ private enum ClaudeUsageClientError: Error {
     case invalidResponse
     case invalidCredential
     case identityMismatch
+    case rateLimited(TimeInterval?)
     case requestFailed(Int)
 }
 

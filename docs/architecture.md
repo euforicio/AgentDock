@@ -30,6 +30,13 @@ telemetry egress boundary. It owns opt-out gating, identifier lifecycle, typed
 schema validation, bounded in-memory batching, and regional HTTPS delivery.
 Call sites cannot add arbitrary event names, keys, or string values.
 
+Claude live-usage responses are cached per credential for five minutes.
+Concurrent reads for the same credential share one in-flight request, and
+failures temporarily suppress automatic retries (including provider-supplied
+`Retry-After` values for rate limits). The explicit user refresh action can
+bypass freshness and failure cooldowns; navigation, profile launch, and the
+automatic activity timer cannot.
+
 ### Core
 
 [Sources/CodexerCore](../Sources/CodexerCore) owns the security-sensitive boundaries:
