@@ -6,6 +6,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>AgentDock</title>
         <item>
+            <title>0.1.10</title>
+            <pubDate>Sat, 29 Aug 2026 00:28:35 +0000</pubDate>
+            <link>https://github.com/euforicio/AgentDock</link>
+            <sparkle:version>1010</sparkle:version>
+            <sparkle:shortVersionString>0.1.10</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/euforicio/AgentDock/releases/download/v0.1.10/AgentDock-0.1.10.zip" length="7086027" type="application/octet-stream" sparkle:edSignature="6FYDPQI5Ehm8dBCjkFm70maTdyQ3S43j3sbhCzWvPtD2EXlPilj5Uj0Wgofs4l3e7g6ilAlbb5UqveG+tKLOBg=="/>
+        </item>
+        <item>
             <title>0.1.9</title>
             <pubDate>Sat, 29 Aug 2026 00:22:57 +0000</pubDate>
             <link>https://github.com/euforicio/AgentDock</link>
@@ -25,19 +35,9 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/euforicio/AgentDock/releases/download/v0.1.8/AgentDock-0.1.8.zip" length="6994518" type="application/octet-stream" sparkle:edSignature="DQFOb1iUF2JJOFxgN43hmMSgTEMhDOVJkgXft05CnJb+FKZDTSggXMHDkd6uJdt8m/RQnSyvRBp7OqrzxhREDA=="/>
         </item>
-        <item>
-            <title>0.1.7</title>
-            <pubDate>Fri, 28 Aug 2026 23:34:25 +0000</pubDate>
-            <link>https://github.com/euforicio/AgentDock</link>
-            <sparkle:version>1007</sparkle:version>
-            <sparkle:shortVersionString>0.1.7</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/euforicio/AgentDock/releases/download/v0.1.7/AgentDock-0.1.7.zip" length="6979768" type="application/octet-stream" sparkle:edSignature="ZbAdgs9qZZeWoDiL6gEipPShJxuRrsVTIlnDHYno9pmFnDd1AEfbO8FBfGE/aS+qNIFtnIIKs55XX8+i5mAHBw=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: vCBu1o3PfxfkP568aPQGaRcbcqKGH+iCeGHSbWlrE/fVvzX6wL+tYhNZrhwSI66+/cW9ekvAlhydCOvN6MQ3DA==
-length: 2683
+edSignature: wlpisrTDwK5EI1s5kLF447/awdo9y+ZErft3gceXYeGKIuw3TGlUqQLGRQqeroxCGutmcHo0L9nC2WMY2y65AQ==
+length: 2687
 -->
