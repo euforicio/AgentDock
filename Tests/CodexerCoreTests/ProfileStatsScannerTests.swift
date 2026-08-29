@@ -224,6 +224,71 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertTrue(stats.errorMessages.isEmpty)
     }
 
+    func testClaudeStatsAggregateProfileScopedUsageAndModels() throws {
+        let profile = CodexProfile(
+            product: .claude,
+            name: "Claude Work",
+            slug: "claude-work",
+            rootDirectory: root
+        )
+        let metadata = profile.claudeUserDataPath.appendingPathComponent(
+            "claude-code-sessions/org/workspace/local_fixture.json"
+        )
+        let audit = profile.claudeUserDataPath.appendingPathComponent(
+            "local-agent-mode-sessions/org/workspace/local_fixture/audit.jsonl"
+        )
+        try FileManager.default.createDirectory(
+            at: metadata.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: audit.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let now = Date(timeIntervalSince1970: 1_785_232_900)
+        try JSONSerialization.data(withJSONObject: [
+            "sessionId": "session-1",
+            "title": "Measure usage",
+            "model": "claude-opus-4-1",
+            "createdAt": 1_785_232_800_000,
+            "lastActivityAt": 1_785_232_860_000,
+            "isArchived": false
+        ], options: [.sortedKeys]).write(to: metadata)
+        let records: [[String: Any]] = [[
+            "type": "assistant",
+            "timestamp": "2026-07-28T10:01:00Z",
+            "message": [
+                "id": "message-1",
+                "model": "claude-opus-4-1",
+                "usage": [
+                    "input_tokens": 10,
+                    "cache_read_input_tokens": 20,
+                    "cache_creation_input_tokens": 30,
+                    "output_tokens": 40
+                ]
+            ]
+        ]]
+        let lines = try records.map {
+            String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self)
+        }
+        try Data(lines.joined(separator: "\n").utf8).write(to: audit)
+
+        let stats = ProfileStatsScanner().stats(for: profile, now: now)
+
+        XCTAssertEqual(stats.totalSessions, 1)
+        XCTAssertEqual(stats.weeklySessions, 1)
+        XCTAssertEqual(stats.activeSessions, 1)
+        XCTAssertEqual(stats.tokenizedSessions, 1)
+        XCTAssertEqual(stats.totalTokens, 100)
+        XCTAssertEqual(stats.weeklyTokens, 100)
+        XCTAssertEqual(stats.averageTokensPerSession, 100)
+        XCTAssertEqual(stats.peakSessionTokens, 100)
+        XCTAssertEqual(stats.modelUsage, [
+            ModelUsageSummary(model: "claude-opus-4-1", sessions: 1, tokens: 100)
+        ])
+        XCTAssertEqual(stats.lastActivityAt, Date(timeIntervalSince1970: 1_785_232_860))
+    }
+
     func testHungSQLiteProcessIsTerminatedAtTimeout() throws {
         let profile = CodexProfile(name: "Hung", slug: "hung", rootDirectory: root)
         try FileManager.default.createDirectory(at: profile.codexHomePath, withIntermediateDirectories: true)

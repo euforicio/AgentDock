@@ -98,6 +98,70 @@ final class LocalChatSessionTests: XCTestCase {
         )
     }
 
+    func testClaudeUsageDeduplicatesMessagesAndKeepsLatestLimitSignal() throws {
+        let usage: [String: Any] = [
+            "input_tokens": 2,
+            "cache_read_input_tokens": 1_000,
+            "cache_creation_input_tokens": 66_818,
+            "output_tokens": 286
+        ]
+        let assistant: [String: Any] = [
+            "type": "assistant",
+            "uuid": "assistant-usage",
+            "requestId": "request-1",
+            "timestamp": "2026-07-28T10:00:02Z",
+            "message": [
+                "id": "message-1",
+                "model": "claude-opus-4-1",
+                "usage": usage,
+                "content": [["type": "text", "text": "Done"]]
+            ]
+        ]
+        try makeCoworkFixture(auditRecords: [
+            assistant,
+            assistant,
+            [
+                "type": "rate_limit_event",
+                "uuid": "limit-1",
+                "timestamp": "2026-07-28T10:00:03Z",
+                "rate_limit_info": [
+                    "status": "allowed_warning",
+                    "rateLimitType": "five_hour",
+                    "utilization": 0.91,
+                    "resetsAt": 1_785_236_400,
+                    "isUsingOverage": false
+                ]
+            ],
+            [
+                "type": "rate_limit_event",
+                "uuid": "limit-2",
+                "timestamp": "2026-07-28T10:00:04Z",
+                "rate_limit_info": [
+                    "status": "allowed",
+                    "rateLimitType": "five_hour",
+                    "resetsAt": 1_785_240_000,
+                    "isUsingOverage": false
+                ]
+            ]
+        ])
+
+        let session = try XCTUnwrap(
+            LocalChatScanner(indexRootURL: root.appendingPathComponent("Indexes"))
+                .scanOfficialClaude(claudeHomeURL: root)
+                .sessions.first
+        )
+
+        XCTAssertEqual(session.tokenCount, 68_106)
+        XCTAssertEqual(session.latestUsageLimit?.status, .allowed)
+        XCTAssertEqual(session.latestUsageLimit?.bucket, "five_hour")
+        XCTAssertNil(session.latestUsageLimit?.usedPercent)
+        XCTAssertEqual(
+            session.latestUsageLimit?.resetsAt,
+            Date(timeIntervalSince1970: 1_785_240_000)
+        )
+        XCTAssertEqual(session.latestUsageLimit?.isUsingOverage, false)
+    }
+
     func testManagedCoworkHistoryUsesProfileIdentity() throws {
         let profileRoot = root.appendingPathComponent("Profiles", isDirectory: true)
         let profile = CodexProfile(

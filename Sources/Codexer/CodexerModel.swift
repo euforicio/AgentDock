@@ -53,6 +53,7 @@ final class CodexerModel: ObservableObject {
     @Published private(set) var statsLoadingProfileIDs: Set<CodexProfile.ID> = []
     @Published private(set) var profileRateLimits: [CodexProfile.ID: ProfileRateLimits] = [:]
     @Published private(set) var officialCodexStats = ProfileStats.empty
+    @Published private(set) var officialClaudeStats = ProfileStats.empty
     @Published private(set) var officialStatsLoading = false
     @Published private(set) var officialCodexRateLimits: ProfileRateLimits?
     @Published private(set) var profileInstanceStatuses: [CodexProfile.ID: CodexInstanceStatus] = [:]
@@ -370,11 +371,28 @@ final class CodexerModel: ObservableObject {
                         now: Date()
                     )
                     : nil
+                let officialClaude = replaceAll
+                    ? scanner.stats(
+                        claudeUserDataURL: FileManager.default.urls(
+                            for: .applicationSupportDirectory,
+                            in: .userDomainMask
+                        )[0].appendingPathComponent("Claude", isDirectory: true),
+                        claudeCodeHomeURL: FileManager.default.homeDirectoryForCurrentUser
+                            .appendingPathComponent(".claude", isDirectory: true),
+                        dataRootURL: FileManager.default.urls(
+                            for: .applicationSupportDirectory,
+                            in: .userDomainMask
+                        )[0].appendingPathComponent("Claude", isDirectory: true),
+                        now: Date()
+                    )
+                    : nil
                 for profile in profiles {
-                    guard !Task.isCancelled else { return (collected, official) }
+                    guard !Task.isCancelled else {
+                        return (collected, official, officialClaude)
+                    }
                     collected[profile.id] = scanner.stats(for: profile, now: Date())
                 }
-                return (collected, official)
+                return (collected, official, officialClaude)
             }
             let results = await withTaskCancellationHandler {
                 await worker.value
@@ -390,6 +408,9 @@ final class CodexerModel: ObservableObject {
                 self.profileStats = results.0
                 if let official = results.1 {
                     self.officialCodexStats = official
+                }
+                if let officialClaude = results.2 {
+                    self.officialClaudeStats = officialClaude
                 }
             } else {
                 self.profileStats.merge(results.0) { _, new in new }

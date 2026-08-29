@@ -37,10 +37,24 @@ private struct ProfileOverview: View {
               limits: model.rateLimits(for: profile), accent: Color(hex: profile.iconColor)
             )
             .padding(.top, 18)
+          } else {
+            ClaudeUsageCard(
+              stats: model.stats(for: profile),
+              loading: model.statsAreLoading(for: profile),
+              accent: Color(hex: profile.iconColor)
+            )
+            .padding(.top, 18)
           }
 
           activity
             .padding(.top, 20)
+
+          if profile.product == .claude,
+             model.profiles.filter({ $0.product == .claude }).count > 1
+          {
+            ClaudeProfilesCard(selectedProfile: profile)
+              .padding(.top, 16)
+          }
 
           Button {
             model.detailTab = .advanced
@@ -218,11 +232,22 @@ private struct ProfileOverview: View {
         } else {
           Divider().overlay(AgentDockPalette.divider).frame(height: 0)
           ActivityRow(
-            icon: "lock.shield",
-            title: "Local activity",
-            value: "Unavailable from Claude Desktop"
+            icon: "text.bubble",
+            title: "Local sessions",
+            value: loading ? "Loading…" : stats.totalSessions.formatted()
           ) {
-            activityDestination = .localActivity
+            activityDestination = .lastActivity
+          }
+          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
+          ActivityRow(
+            icon: "waveform.path.ecg",
+            title: "Latest local activity",
+            value: loading
+              ? "Loading…"
+              : stats.lastActivityAt?.formatted(date: .abbreviated, time: .shortened)
+                ?? "No activity yet"
+          ) {
+            activityDestination = .lastActivity
           }
         }
       }
@@ -232,7 +257,7 @@ private struct ProfileOverview: View {
 
       if profile.product == .claude {
         Label(
-          "Claude Desktop does not expose supported usage-limit or transcript metadata for managed profiles. AgentDock shows lifecycle and storage only.",
+          "Token and activity totals come from this profile's local Cowork history. Limit status is the latest Claude-emitted signal, not a complete quota snapshot.",
           systemImage: "info.circle"
         )
         .font(.caption)
@@ -311,6 +336,17 @@ private struct OfficialOverview: View {
             activityDestination = destination
           }
         } else {
+          ClaudeUsageCard(
+            stats: model.officialClaudeStats,
+            loading: model.officialStatsLoading,
+            accent: .orange
+          )
+          OfficialActivityCard(
+            stats: model.officialClaudeStats,
+            loading: model.officialStatsLoading
+          ) { destination in
+            activityDestination = destination
+          }
           VStack(alignment: .leading, spacing: 6) {
             Label("Claude Desktop local boundary", systemImage: "lock.shield")
               .fontWeight(.medium)
@@ -331,6 +367,177 @@ private struct OfficialOverview: View {
     .sheet(item: $activityDestination) { destination in
       ActivityDetailSheet(officialProduct: product, destination: destination)
     }
+  }
+}
+
+private struct ClaudeUsageCard: View {
+  let stats: ProfileStats
+  let loading: Bool
+  let accent: Color
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      SectionLabel(title: "Claude Usage")
+      VStack(spacing: 0) {
+        HStack(spacing: 0) {
+          metric(title: "Sessions, 7 days", value: loading ? "Loading…" : stats.weeklySessions.formatted())
+          Divider().overlay(AgentDockPalette.divider)
+          metric(title: "Processed tokens, 7 days", value: loading ? "Loading…" : stats.weeklyTokens.formatted())
+          Divider().overlay(AgentDockPalette.divider)
+          metric(title: "Token coverage", value: loading ? "Loading…" : coverageText)
+        }
+        .frame(height: 72)
+
+        Divider().overlay(AgentDockPalette.divider)
+
+        usageLimitSignal
+
+        if !stats.modelUsage.isEmpty {
+          Divider().overlay(AgentDockPalette.divider)
+          VStack(alignment: .leading, spacing: 8) {
+            Text("Models")
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(.secondary)
+            ForEach(stats.modelUsage.prefix(3)) { model in
+              HStack {
+                Text(model.model)
+                  .font(.system(size: 12, design: .monospaced))
+                  .lineLimit(1)
+                Spacer()
+                Text("\(model.sessions) sessions · \(model.tokens.formatted()) tokens")
+                  .font(.system(size: 11).monospacedDigit())
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+          .padding(12)
+        }
+      }
+      .background { OverviewSurfaceCard(cornerRadius: 8) }
+    }
+  }
+
+  private func metric(title: String, value: String) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(title)
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+      Text(value)
+        .font(.system(size: 17, weight: .semibold).monospacedDigit())
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+    }
+    .padding(.horizontal, 12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder
+  private var usageLimitSignal: some View {
+    if let signal = stats.latestUsageLimit {
+      HStack(spacing: 12) {
+        Image(systemName: signal.status == .rejected ? "exclamationmark.octagon.fill" : "gauge.with.dots.needle.50percent")
+          .foregroundStyle(signal.status == .rejected ? .red : (signal.status == .warning ? .orange : accent))
+          .frame(width: 28)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(limitTitle(signal))
+            .font(.system(size: 13, weight: .medium))
+          Text(limitDetail(signal))
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        Spacer()
+        if let percent = signal.usedPercent {
+          Text("\(Int(percent.rounded()))% used")
+            .font(.system(size: 12).monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+      }
+      .padding(12)
+    } else {
+      Label("No Claude limit signal has been emitted in the scanned local history.", systemImage: "gauge.open.with.lines.needle.33percent")
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private var coverageText: String {
+    guard stats.totalSessions > 0 else { return "No sessions" }
+    return "\(stats.tokenizedSessions) of \(stats.totalSessions)"
+  }
+
+  private func limitTitle(_ signal: UsageLimitSignal) -> String {
+    let bucket = signal.bucket?
+      .replacingOccurrences(of: "_", with: " ")
+      .capitalized ?? "Usage"
+    switch signal.status {
+    case .allowed: return "\(bucket) allowed"
+    case .warning: return "\(bucket) nearing limit"
+    case .rejected: return "\(bucket) limit reached"
+    }
+  }
+
+  private func limitDetail(_ signal: UsageLimitSignal) -> String {
+    var parts = ["Observed \(signal.observedAt.formatted(date: .abbreviated, time: .shortened))"]
+    if let reset = signal.resetsAt {
+      parts.append("resets \(reset.formatted(date: .omitted, time: .shortened))")
+    }
+    if signal.isUsingOverage == true { parts.append("using overage") }
+    return parts.joined(separator: " · ")
+  }
+}
+
+private struct ClaudeProfilesCard: View {
+  @EnvironmentObject private var model: CodexerModel
+  let selectedProfile: CodexProfile
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      SectionLabel(title: "Claude Profiles")
+      VStack(spacing: 0) {
+        ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
+          Button {
+            model.selectProfile(profile.id)
+          } label: {
+            HStack(spacing: 10) {
+              ProfileIconView(profile: profile, size: 30)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(profile.name)
+                  .font(.system(size: 13, weight: profile.id == selectedProfile.id ? .semibold : .regular))
+                Text(summary(for: profile))
+                  .font(.system(size: 11))
+                  .foregroundStyle(.secondary)
+              }
+              Spacer()
+              StatusDot(isRunning: model.instanceStatus(for: profile).isRunning, size: 7)
+              Text(model.instanceStatus(for: profile).isRunning ? "Running" : "Stopped")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 50)
+            .contentShape(.rect)
+          }
+          .buttonStyle(.plain)
+          if index < profiles.count - 1 {
+            Divider().overlay(AgentDockPalette.divider)
+          }
+        }
+      }
+      .background { OverviewSurfaceCard(cornerRadius: 8) }
+    }
+  }
+
+  private var profiles: [CodexProfile] {
+    model.profiles.filter { $0.product == .claude }
+  }
+
+  private func summary(for profile: CodexProfile) -> String {
+    let stats = model.stats(for: profile)
+    if model.statsAreLoading(for: profile) { return "Loading local usage…" }
+    return "\(stats.weeklySessions) sessions · \(stats.weeklyTokens.formatted()) tokens in 7 days"
   }
 }
 

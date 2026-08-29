@@ -15,6 +15,9 @@ public struct ProfileStats: Equatable, Sendable {
     public var dataBytes: Int64
     public var lastActivityAt: Date?
     public var jobCounts: [String: Int]
+    public var tokenizedSessions: Int
+    public var modelUsage: [ModelUsageSummary]
+    public var latestUsageLimit: UsageLimitSignal?
     public var errorMessages: [String]
 
     public static let empty = ProfileStats(
@@ -32,8 +35,49 @@ public struct ProfileStats: Equatable, Sendable {
         dataBytes: 0,
         lastActivityAt: nil,
         jobCounts: [:],
+        tokenizedSessions: 0,
+        modelUsage: [],
+        latestUsageLimit: nil,
         errorMessages: []
     )
+}
+
+public struct ModelUsageSummary: Equatable, Identifiable, Sendable {
+    public var id: String { model }
+    public var model: String
+    public var sessions: Int
+    public var tokens: Int
+}
+
+public struct UsageLimitSignal: Equatable, Hashable, Sendable {
+    public enum Status: String, Equatable, Hashable, Sendable {
+        case allowed
+        case warning = "allowed_warning"
+        case rejected
+    }
+
+    public var status: Status
+    public var bucket: String?
+    public var usedPercent: Double?
+    public var resetsAt: Date?
+    public var observedAt: Date
+    public var isUsingOverage: Bool?
+
+    public init(
+        status: Status,
+        bucket: String? = nil,
+        usedPercent: Double? = nil,
+        resetsAt: Date? = nil,
+        observedAt: Date,
+        isUsingOverage: Bool? = nil
+    ) {
+        self.status = status
+        self.bucket = bucket
+        self.usedPercent = usedPercent
+        self.resetsAt = resetsAt
+        self.observedAt = observedAt
+        self.isUsingOverage = isUsingOverage
+    }
 }
 
 public struct TokenUsageBucket: Equatable, Identifiable, Sendable {
@@ -47,23 +91,51 @@ public final class ProfileStatsScanner: @unchecked Sendable {
     private let fileManager: FileManager
     private let sqliteExecutable: URL
     private let queryTimeout: TimeInterval
+    private let claudeChatScanner: LocalChatScanner
     private let dataSizeCacheLock = NSLock()
     private var dataSizeCache: [String: (measuredAt: Date, bytes: Int64)] = [:]
 
     public init(
         fileManager: FileManager = .default,
         sqliteExecutable: URL = URL(fileURLWithPath: "/usr/bin/sqlite3"),
-        queryTimeout: TimeInterval = 10
+        queryTimeout: TimeInterval = 10,
+        claudeChatScanner: LocalChatScanner = LocalChatScanner(maximumSessions: 10_000)
     ) {
         self.fileManager = fileManager
         self.sqliteExecutable = sqliteExecutable
         self.queryTimeout = queryTimeout
+        self.claudeChatScanner = claudeChatScanner
     }
 
     public func stats(for profile: CodexProfile, now: Date = Date()) -> ProfileStats {
-        stats(
-            codexHomeURL: profile.codexHomePath,
-            dataRootURL: profile.profileDirectory,
+        switch profile.product {
+        case .codex:
+            stats(
+                codexHomeURL: profile.codexHomePath,
+                dataRootURL: profile.profileDirectory,
+                now: now
+            )
+        case .claude:
+            claudeStats(
+                sessions: claudeChatScanner.scan(profile: profile).sessions,
+                dataRootURL: profile.profileDirectory,
+                now: now
+            )
+        }
+    }
+
+    public func stats(
+        claudeUserDataURL: URL,
+        claudeCodeHomeURL: URL,
+        dataRootURL: URL,
+        now: Date = Date()
+    ) -> ProfileStats {
+        claudeStats(
+            sessions: claudeChatScanner.scanOfficialClaude(
+                claudeHomeURL: claudeUserDataURL,
+                claudeCodeHomeURL: claudeCodeHomeURL
+            ).sessions,
+            dataRootURL: dataRootURL,
             now: now
         )
     }
@@ -186,6 +258,72 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         }
 
         return stats
+    }
+
+    private func claudeStats(
+        sessions: [LocalChatSession],
+        dataRootURL: URL,
+        now: Date
+    ) -> ProfileStats {
+        var stats = ProfileStats.empty
+        stats.dataBytes = cachedDirectorySize(dataRootURL, now: now)
+        guard !Task.isCancelled else { return stats }
+
+        let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        let weekly = sessions.filter { $0.updatedAt >= weekStart && $0.updatedAt <= now }
+        let tokenized = sessions.filter { $0.tokenCount != nil }
+
+        stats.totalSessions = sessions.count
+        stats.weeklySessions = weekly.count
+        stats.activeSessions = sessions.filter { $0.status != "Archived" }.count
+        stats.archivedSessions = sessions.filter { $0.status == "Archived" }.count
+        stats.tokenizedSessions = tokenized.count
+        stats.totalTokens = tokenized.reduce(0) {
+            Self.saturatingAdd($0, $1.tokenCount ?? 0)
+        }
+        stats.weeklyTokens = weekly.reduce(0) {
+            Self.saturatingAdd($0, $1.tokenCount ?? 0)
+        }
+        stats.peakSessionTokens = tokenized.compactMap(\.tokenCount).max() ?? 0
+        stats.averageTokensPerSession = tokenized.isEmpty
+            ? 0
+            : stats.totalTokens / tokenized.count
+        stats.lastActivityAt = sessions.map(\.updatedAt).max()
+        stats.latestUsageLimit = sessions.compactMap(\.latestUsageLimit).max {
+            $0.observedAt < $1.observedAt
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let buckets = Dictionary(grouping: weekly) { calendar.startOfDay(for: $0.updatedAt) }
+        stats.weeklyTokenBuckets = buckets.map { day, sessions in
+            TokenUsageBucket(
+                dayStart: day,
+                tokens: sessions.reduce(0) { Self.saturatingAdd($0, $1.tokenCount ?? 0) },
+                sessions: sessions.count
+            )
+        }.sorted { $0.dayStart < $1.dayStart }
+
+        let models = Dictionary(grouping: sessions) { session in
+            session.model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? session.model!
+                : "Unknown model"
+        }
+        stats.modelUsage = models.map { model, sessions in
+            ModelUsageSummary(
+                model: model,
+                sessions: sessions.count,
+                tokens: sessions.reduce(0) { Self.saturatingAdd($0, $1.tokenCount ?? 0) }
+            )
+        }.sorted {
+            if $0.tokens == $1.tokens { return $0.sessions > $1.sessions }
+            return $0.tokens > $1.tokens
+        }
+        return stats
+    }
+
+    private static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : sum
     }
 
     private func profileStateRows(

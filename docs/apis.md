@@ -51,6 +51,12 @@ not use a generic Electron profile flag for Claude.
 Readers validate containment, type, ownership, and size before using persisted
 paths or provider records.
 
+Claude activity and token summaries are derived at runtime from validated local
+Cowork audit records and are not a new persisted format. The summary includes
+coverage so partially available token data is not mistaken for complete usage.
+Locally emitted rate-limit events are advisory snapshots, not a stable provider
+quota API.
+
 ## Build and Release Environment
 
 The build scripts accept namespaced environment variables including:

@@ -37,6 +37,12 @@ extension DesktopInstanceController: DesktopInstanceManaging {}
 public protocol ProfileStatsScanning: Sendable {
     func stats(for profile: CodexProfile, now: Date) -> ProfileStats
     func stats(codexHomeURL: URL, dataRootURL: URL, now: Date) -> ProfileStats
+    func stats(
+        claudeUserDataURL: URL,
+        claudeCodeHomeURL: URL,
+        dataRootURL: URL,
+        now: Date
+    ) -> ProfileStats
 }
 
 extension ProfileStatsScanner: ProfileStatsScanning {}

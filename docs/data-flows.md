@@ -55,6 +55,14 @@ profile path.
 7. Additional pages append in source order while stable IDs prevent duplicate
    rows and stale chat switches are suppressed.
 
+For managed Claude profiles, the same validated Cowork audit sources also feed
+an in-memory usage summary. Assistant token records are deduplicated by their
+message/request identity before aggregation, scans are byte-bounded and cached
+by source size and modification time, and model totals remain profile-scoped.
+Claude `rate_limit_event` records contribute only their latest observed status,
+bucket, reset time, and optional utilization. Missing utilization stays missing;
+AgentDock does not carry an older percentage into a newer limit window.
+
 Full transcript bodies and tool output are not stored in the summary index.
 Malformed, partial, and unsupported events remain visible instead of silently
 disappearing.
