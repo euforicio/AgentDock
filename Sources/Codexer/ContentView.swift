@@ -176,16 +176,19 @@ struct ContentView: View {
             .buttonStyle(.plain)
 
             ForEach(profiles) { profile in
-                Button {
-                    showsSettings = false
-                    model.selectProfile(profile.id)
-                } label: {
-                    ProfileSidebarRow(
-                        profile: profile,
-                        isSelected: !showsSettings && model.selectedProfileID == profile.id
-                    )
-                }
-                .buttonStyle(.plain)
+                ProfileSidebarRow(
+                    profile: profile,
+                    isSelected: !showsSettings && model.selectedProfileID == profile.id,
+                    onSelect: {
+                        showsSettings = false
+                        model.selectProfile(profile.id)
+                    },
+                    onOpen: {
+                        showsSettings = false
+                        model.selectProfile(profile.id)
+                        model.launch(profile)
+                    }
+                )
             }
 
             if profiles.isEmpty, !profileSearch.isEmpty {
@@ -466,38 +469,52 @@ private struct ProfileSidebarRow: View {
     @EnvironmentObject private var model: CodexerModel
     let profile: CodexProfile
     let isSelected: Bool
+    let onSelect: () -> Void
+    let onOpen: () -> Void
 
     var body: some View {
         let running = model.instanceStatus(for: profile).isRunning
         HStack(spacing: 9) {
-            ProfileIconView(profile: profile, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(profile.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    if model.preferences.showStatusInProfileList {
-                        StatusDot(isRunning: running, size: 6)
-                    }
-                    Text(profile.slug)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            Button(action: onOpen) {
+                ProfileIconView(profile: profile, size: 32)
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .help(running ? "Focus \(profile.name)" : "Open \(profile.name)")
+            .accessibilityLabel(running ? "Focus \(profile.name)" : "Open \(profile.name)")
+
+            Button(action: onSelect) {
+                HStack(spacing: 9) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(profile.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            if model.preferences.showStatusInProfileList {
+                                StatusDot(isRunning: running, size: 6)
+                            }
+                            Text(profile.slug)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            .accessibilityValue(running ? "Running" : "Stopped")
         }
         .padding(.horizontal, 10)
         .frame(height: 46)
         .background(isSelected ? AgentDockPalette.blue.opacity(0.72) : .clear, in: .rect(cornerRadius: 8))
-        .contentShape(.rect)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityValue(running ? "Running" : "Stopped")
     }
 }
 

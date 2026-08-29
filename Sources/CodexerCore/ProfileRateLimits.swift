@@ -83,6 +83,7 @@ public enum RateLimitParser {
         }
 
         let buckets = snapshots.compactMap { snapshot -> RateLimitBucket? in
+            guard !snapshot.isSparkUsageLimit else { return nil }
             let id = snapshot.limitId ?? snapshot.limitName ?? "default"
             let name = snapshot.limitName ?? displayName(for: id)
             return RateLimitBucket(
@@ -144,6 +145,10 @@ private struct AppServerRateLimitSnapshot: Decodable {
     var credits: AppServerCredits?
     var planType: String?
     var rateLimitReachedType: String?
+
+    var isSparkUsageLimit: Bool {
+        limitName?.localizedCaseInsensitiveContains("spark") == true
+    }
 }
 
 private struct AppServerRateLimitWindow: Decodable {

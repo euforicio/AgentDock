@@ -47,15 +47,14 @@ final class RateLimitParserTests: XCTestCase {
 
         XCTAssertEqual(limits.planType, "pro")
         XCTAssertEqual(limits.credits?.balance, "0")
-        XCTAssertEqual(limits.buckets.count, 2)
+        XCTAssertEqual(limits.buckets.count, 1)
         let codex = try XCTUnwrap(limits.buckets.first { $0.id == "codex" })
         XCTAssertEqual(codex.name, "Codex")
         XCTAssertEqual(codex.primary?.usedPercent, 36)
         XCTAssertEqual(codex.primary?.windowDurationMins, 300)
         XCTAssertEqual(codex.secondary?.usedPercent, 43)
         XCTAssertEqual(codex.secondary?.windowDurationMins, 10080)
-        let model = try XCTUnwrap(limits.buckets.first { $0.id == "codex_bengalfox" })
-        XCTAssertEqual(model.name, "GPT-5.3-Codex-Spark")
+        XCTAssertFalse(limits.buckets.contains { $0.id == "codex_bengalfox" })
     }
 
     func testFallsBackToPrimarySnapshotWhenLimitMapIsAbsent() throws {
