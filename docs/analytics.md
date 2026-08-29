@@ -9,8 +9,8 @@ AgentDock uses a small first-party HTTPS client rather than the PostHog Swift
 SDK. The official SDK supports macOS, but currently defaults several collection
 and remote-config features on and adds a session identifier. The first-party
 boundary sends only the schema below and has no autocapture, screen capture,
-session replay, feature flags, surveys, push collection, crash reporting, logs,
-or identify calls.
+session replay, feature flags, surveys, push collection, uploaded crash reports,
+uploaded logs, or identify calls.
 
 This decision was revalidated on August 28, 2026 against the official
 [`posthog-ios` package](https://github.com/PostHog/posthog-ios) (latest stable
@@ -30,7 +30,9 @@ larger, less auditable boundary than AgentDock needs.
   pending events and deletes it; later re-enabling creates an unlinkable UUID.
 - Events stay in memory for at most five seconds or twelve events. The queue is
   capped at 48 events, never written to disk, and discarded on delivery failure
-  or app exit. Requests are capped at 64 KiB.
+  or app exit. Requests are capped at 64 KiB. Successful and failed batch counts
+  plus the last bounded failure class are retained in memory; failures also emit
+  a local OS log entry containing only that class.
 - Every request sets `$geoip_disable: true` and
   `$process_person_profile: false`. Disable IP capture in PostHog too.
 - Common context is limited to the random `distinct_id`, schema version, app
@@ -45,6 +47,13 @@ commands, prompts, transcript/chat content, local chat or session identifiers,
 configuration values, environment variables, logs, crash content, raw errors,
 repository/branch/model names, clipboard contents, search text, or timestamps
 read from provider data.
+
+Plan and usage telemetry is deliberately coarse. Provider plan strings are
+mapped to a closed tier (`free`, `plus`, `pro`, `max`, `team`, `business`,
+`enterprise`, `education`, or `unknown`). Usage is reduced to bounded percent
+bands and only the highest observed primary and secondary window per profile is
+used. Exact percentages, balances, reset times, limit names, and model scopes
+never leave the app.
 
 ## Event Catalog
 
@@ -63,12 +72,16 @@ read from provider data.
 | `error` | `errorCode`, `surface`, `provider`, `action` | Reliability grouped into stable safe codes; no raw errors. |
 | `performance` | `durationBucket`, `surface`, `action`, `provider`, `countBucket` | Coarse latency distribution. |
 | `feature_adoption` | `action`, `feature`, `surface`, `provider` | Adoption of major capabilities. |
+| `profile_inventory` | `action`, `outcome`, `provider`, `profileScope`, `planTier`, `countBucket` | Coarse managed/official profile and plan distribution. |
+| `usage_snapshot` | `action`, `outcome`, `provider`, `profileScope`, `planTier`, `usageBucket`, `limitWindow`, `countBucket` | Aggregate quota pressure by safe plan and usage bands. |
 
 Allowed dimensions live in
 [`ProductAnalytics.swift`](../Sources/CodexerCore/ProductAnalytics.swift).
 Count buckets are `zero`, `one`, `twoToFive`, `sixToTwenty`, and
 `twentyOnePlus`. Duration buckets are `under100ms`, `ms100To499`,
 `ms500To1999`, `seconds2To9`, and `seconds10Plus`.
+Usage buckets are `zero`, `under25`, `percent25To49`, `percent50To74`,
+`percent75To89`, `percent90To99`, and `atOrOver100`.
 
 ## PostHog Project Setup
 
@@ -93,8 +106,9 @@ Without both valid variables, analytics delivery remains disabled.
 ## Dashboards, Funnels, Cohorts, and Retention
 
 Create a **Product health** dashboard with weekly opted-in active installations;
-app-version/update adoption; success rates by action/provider; safe error-code
-trends; latency buckets; and feature/surface adoption.
+app-version/update adoption; profile and plan distribution; quota-use bands;
+success rates by action/provider; safe error-code trends; latency buckets; and
+feature/surface adoption.
 
 Create these funnels:
 

@@ -327,7 +327,7 @@ final class CodexerModel: ObservableObject {
                 errorMessage = nil
             } catch {
                 profiles = previousProfiles
-                present(error)
+                present(error, code: .persistenceFailed, provider: product.analyticsProvider, action: .edited)
             }
         }
         return true
@@ -597,6 +597,115 @@ final class CodexerModel: ObservableObject {
             } else {
                 self.profileRateLimits.merge(results) { _, new in new }
             }
+            self.captureRateLimitAnalytics(
+                profiles: profiles,
+                limitsByProfileID: results,
+                officialCodex: replaceAll ? official : nil,
+                officialClaude: replaceAll ? officialClaude : nil,
+                includeInventory: replaceAll
+            )
+        }
+    }
+
+    private func captureRateLimitAnalytics(
+        profiles: [CodexProfile],
+        limitsByProfileID: [CodexProfile.ID: ProfileRateLimits],
+        officialCodex: ProfileRateLimits?,
+        officialClaude: ProfileRateLimits?,
+        includeInventory: Bool
+    ) {
+        var sources: [AnalyticsRateLimitSource] = profiles.map { profile in
+            AnalyticsRateLimitSource(
+                provider: profile.product.analyticsProvider,
+                scope: .managed,
+                limits: limitsByProfileID[profile.id] ?? ProfileRateLimits(
+                    errorMessage: "Unavailable"
+                )
+            )
+        }
+        if let officialCodex {
+            sources.append(AnalyticsRateLimitSource(
+                provider: .codex,
+                scope: .official,
+                limits: officialCodex
+            ))
+        }
+        if let officialClaude {
+            sources.append(AnalyticsRateLimitSource(
+                provider: .claude,
+                scope: .official,
+                limits: officialClaude
+            ))
+        }
+
+        if includeInventory {
+            let inventory = Dictionary(grouping: sources) { source in
+                AnalyticsInventoryKey(
+                    provider: source.provider,
+                    scope: source.scope,
+                    planTier: AnalyticsPlanTier(providerValue: source.limits.planType),
+                    succeeded: source.limits.errorMessage == nil
+                )
+            }
+            for (key, groupedSources) in inventory {
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .profileInventory,
+                    [
+                        .action(.observed),
+                        .outcome(key.succeeded ? .succeeded : .failed),
+                        .provider(key.provider),
+                        .profileScope(key.scope),
+                        .planTier(key.planTier),
+                        .countBucket(.init(groupedSources.count))
+                    ]
+                ))
+            }
+        }
+
+        let failuresByProvider = Dictionary(grouping: sources.filter {
+            $0.limits.errorMessage != nil
+        }, by: \.provider)
+        for provider in failuresByProvider.keys {
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .error,
+                [.errorCode(.rateLimitUnavailable), .provider(provider), .action(.observed)]
+            ))
+        }
+
+        var usageCounts: [AnalyticsUsageKey: Int] = [:]
+        for source in sources where source.limits.errorMessage == nil {
+            let planTier = AnalyticsPlanTier(providerValue: source.limits.planType)
+            let primary = source.limits.buckets.compactMap(\.primary?.usedPercent).max()
+            let secondary = source.limits.buckets.compactMap(\.secondary?.usedPercent).max()
+            for (window, usedPercent) in [
+                (AnalyticsLimitWindow.primary, primary),
+                (AnalyticsLimitWindow.secondary, secondary)
+            ] {
+                guard let usedPercent else { continue }
+                let key = AnalyticsUsageKey(
+                    provider: source.provider,
+                    scope: source.scope,
+                    planTier: planTier,
+                    window: window,
+                    usageBucket: AnalyticsUsageBucket(usedPercent: usedPercent)
+                )
+                usageCounts[key, default: 0] += 1
+            }
+        }
+        for (key, count) in usageCounts {
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .usageSnapshot,
+                [
+                    .action(.observed),
+                    .outcome(.succeeded),
+                    .provider(key.provider),
+                    .profileScope(key.scope),
+                    .planTier(key.planTier),
+                    .usageBucket(key.usageBucket),
+                    .limitWindow(key.window),
+                    .countBucket(.init(count))
+                ]
+            ))
         }
     }
 
@@ -659,7 +768,7 @@ final class CodexerModel: ObservableObject {
                 .profileLifecycle,
                 [.action(.created), .outcome(.failed), .provider(product.analyticsProvider)]
             ))
-            present(error)
+            present(error, code: .persistenceFailed, provider: product.analyticsProvider, action: .created)
             return false
         }
     }
@@ -668,7 +777,7 @@ final class CodexerModel: ObservableObject {
         guard beginStoreMutationIfAvailable() else { return }
         guard let store else {
             storeMutationInProgress = false
-            errorMessage = CodexerModelError.storeUnavailable.localizedDescription
+            present(CodexerModelError.storeUnavailable)
             return
         }
         let selectedProduct = product
@@ -708,7 +817,7 @@ final class CodexerModel: ObservableObject {
                     [.action(.restored), .outcome(.succeeded), .provider(selectedProduct.analyticsProvider)]
                 ))
             } catch {
-                present(error)
+                present(error, code: .persistenceFailed, provider: selectedProduct.analyticsProvider, action: .restored)
             }
         }
     }
@@ -769,7 +878,7 @@ final class CodexerModel: ObservableObject {
                     .providerStatus,
                     [.action(.configured), .outcome(.failed), .provider(product.analyticsProvider)]
                 ))
-                present(error)
+                present(error, code: .invalidConfiguration, provider: product.analyticsProvider, action: .configured)
             }
         }
     }
@@ -804,7 +913,7 @@ final class CodexerModel: ObservableObject {
                     .launcherLifecycle,
                     [.action(.opened), .outcome(.failed), .provider(profile.product.analyticsProvider), .trigger(.user)]
                 ))
-                present(error)
+                present(error, code: .launchFailed, provider: profile.product.analyticsProvider, action: .opened)
             }
             await refreshInstanceStatuses()
         }
@@ -833,7 +942,7 @@ final class CodexerModel: ObservableObject {
                     [.action(.opened), .outcome(.succeeded), .provider(product.analyticsProvider), .trigger(.user)]
                 ))
             } catch {
-                present(error)
+                present(error, code: .launchFailed, provider: product.analyticsProvider, action: .opened)
             }
             await refreshInstanceStatuses()
         }
@@ -859,7 +968,7 @@ final class CodexerModel: ObservableObject {
                     .launcherLifecycle,
                     [.action(.closed), .outcome(.failed), .provider(profile.product.analyticsProvider), .trigger(.user)]
                 ))
-                present(error)
+                present(error, code: .closeFailed, provider: profile.product.analyticsProvider, action: .closed)
             }
             await refreshInstanceStatuses()
         }
@@ -892,7 +1001,7 @@ final class CodexerModel: ObservableObject {
                     .launcherLifecycle,
                     [.action(.installed), .outcome(.failed), .provider(profile.product.analyticsProvider), .trigger(.user)]
                 ))
-                present(error)
+                present(error, code: .shortcutFailed, provider: profile.product.analyticsProvider, action: .installed)
             }
         }
     }
@@ -915,7 +1024,7 @@ final class CodexerModel: ObservableObject {
                     [.action(.uninstalled), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .trigger(.user)]
                 ))
             } catch {
-                present(error)
+                present(error, code: .shortcutFailed, provider: profile.product.analyticsProvider, action: .uninstalled)
             }
         }
     }
@@ -944,7 +1053,7 @@ final class CodexerModel: ObservableObject {
                     [.action(.removed), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .countBucket(.init(profiles.count))]
                 ))
             } catch {
-                present(error)
+                present(error, code: .persistenceFailed, provider: profile.product.analyticsProvider, action: .removed)
             }
         }
     }
@@ -997,7 +1106,7 @@ final class CodexerModel: ObservableObject {
                     [.action(.edited), .outcome(.succeeded), .provider(profile.product.analyticsProvider)]
                 ))
             } catch {
-                present(error)
+                present(error, code: .persistenceFailed, provider: profile.product.analyticsProvider, action: .edited)
             }
         }
     }
@@ -1033,7 +1142,7 @@ final class CodexerModel: ObservableObject {
                     [.action(.deleted), .outcome(.succeeded), .provider(profile.product.analyticsProvider), .countBucket(.init(profiles.count))]
                 ))
             } catch {
-                present(error)
+                present(error, code: .persistenceFailed, provider: profile.product.analyticsProvider, action: .deleted)
             }
         }
     }
@@ -1420,19 +1529,37 @@ final class CodexerModel: ObservableObject {
             ))
             if let firstFailure = failures.first {
                 errorMessage = "AgentDock updated, but a profile shortcut could not be refreshed: \(firstFailure)"
+                ProductAnalytics.shared.capture(AnalyticsEvent(
+                    .error,
+                    [.errorCode(.shortcutFailed), .provider(.mixed), .action(.repaired)]
+                ))
             }
         }
     }
 
-    private func present(_ error: Error) {
+    private func present(
+        _ error: Error,
+        code requestedCode: AnalyticsErrorCode = .unknownSafe,
+        surface: AnalyticsSurface? = nil,
+        provider: AnalyticsProvider? = nil,
+        action: AnalyticsAction? = nil
+    ) {
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        let code: AnalyticsErrorCode = error is CodexerModelError ? .storeUnavailable : .unknownSafe
-        ProductAnalytics.shared.capture(AnalyticsEvent(.error, [.errorCode(code)]))
+        let code: AnalyticsErrorCode = error is CodexerModelError ? .storeUnavailable : requestedCode
+        var properties: [AnalyticsProperty] = [.errorCode(code)]
+        if let surface { properties.append(.surface(surface)) }
+        if let provider { properties.append(.provider(provider)) }
+        if let action { properties.append(.action(action)) }
+        ProductAnalytics.shared.capture(AnalyticsEvent(.error, properties))
     }
 
     private func beginStoreMutationIfAvailable() -> Bool {
         guard !storeMutationInProgress, busyProfileIDs.isEmpty else {
             errorMessage = "Another profile change is still in progress."
+            ProductAnalytics.shared.capture(AnalyticsEvent(
+                .error,
+                [.errorCode(.operationBusy)]
+            ))
             return false
         }
         storeMutationInProgress = true
@@ -1619,6 +1746,27 @@ final class CodexerModel: ObservableObject {
             }
         }
     }
+}
+
+private struct AnalyticsRateLimitSource {
+    let provider: AnalyticsProvider
+    let scope: AnalyticsProfileScope
+    let limits: ProfileRateLimits
+}
+
+private struct AnalyticsInventoryKey: Hashable {
+    let provider: AnalyticsProvider
+    let scope: AnalyticsProfileScope
+    let planTier: AnalyticsPlanTier
+    let succeeded: Bool
+}
+
+private struct AnalyticsUsageKey: Hashable {
+    let provider: AnalyticsProvider
+    let scope: AnalyticsProfileScope
+    let planTier: AnalyticsPlanTier
+    let window: AnalyticsLimitWindow
+    let usageBucket: AnalyticsUsageBucket
 }
 
 private extension DesktopProduct {

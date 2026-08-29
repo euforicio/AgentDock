@@ -141,6 +141,73 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(AnalyticsDurationBucket(milliseconds: -1), .under100ms)
         XCTAssertEqual(AnalyticsDurationBucket(milliseconds: 9_999), .seconds2To9)
         XCTAssertEqual(AnalyticsDurationBucket(milliseconds: 50_000), .seconds10Plus)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: -1), .zero)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: 24.9), .under25)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: 25), .percent25To49)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: 74.9), .percent50To74)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: 90), .percent90To99)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: 100), .atOrOver100)
+        XCTAssertEqual(AnalyticsUsageBucket(usedPercent: .infinity), .zero)
+    }
+
+    func testPlanTiersNormalizeKnownValuesAndHideUnknownProviderStrings() {
+        XCTAssertEqual(AnalyticsPlanTier(providerValue: "PRO"), .pro)
+        XCTAssertEqual(AnalyticsPlanTier(providerValue: "max_20x"), .max)
+        XCTAssertEqual(AnalyticsPlanTier(providerValue: "teams"), .team)
+        XCTAssertEqual(AnalyticsPlanTier(providerValue: " edu "), .education)
+        XCTAssertEqual(AnalyticsPlanTier(providerValue: "customer-specific-plan"), .unknown)
+        XCTAssertEqual(AnalyticsPlanTier(providerValue: nil), .unknown)
+    }
+
+    func testProfileInventoryAndUsageSnapshotSchemasAreBounded() throws {
+        XCTAssertNotNil(AnalyticsEvent(
+            .profileInventory,
+            [
+                .action(.observed), .outcome(.succeeded), .provider(.claude),
+                .profileScope(.managed), .planTier(.max), .countBucket(.twoToFive)
+            ]
+        ))
+        XCTAssertNotNil(AnalyticsEvent(
+            .usageSnapshot,
+            [
+                .action(.observed), .outcome(.succeeded), .provider(.codex),
+                .profileScope(.official), .planTier(.pro),
+                .usageBucket(.percent50To74), .limitWindow(.primary), .countBucket(.one)
+            ]
+        ))
+        XCTAssertNil(AnalyticsEvent(
+            .usageSnapshot,
+            [.action(.observed), .usageBucket(.under25), .surface(.overview)]
+        ))
+    }
+
+    func testDeliveryFailuresAreClassifiedWithoutRecordingRawErrors() throws {
+        let url = try XCTUnwrap(URL(string: "https://us.i.posthog.com/batch/"))
+        let accepted = try XCTUnwrap(HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        let rejected = try XCTUnwrap(HTTPURLResponse(
+            url: url,
+            statusCode: 429,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+
+        XCTAssertNil(ProductAnalytics.deliveryFailure(response: accepted, error: nil))
+        XCTAssertEqual(ProductAnalytics.deliveryFailure(response: rejected, error: nil), .rejected)
+        XCTAssertEqual(ProductAnalytics.deliveryFailure(response: URLResponse(
+            url: url,
+            mimeType: nil,
+            expectedContentLength: 0,
+            textEncodingName: nil
+        ), error: nil), .invalidResponse)
+        XCTAssertEqual(ProductAnalytics.deliveryFailure(
+            response: accepted,
+            error: URLError(.notConnectedToInternet)
+        ), .transport)
     }
 
     func testCaptureBatchesInMemoryAndOptOutPurgesBeforeDelivery() throws {

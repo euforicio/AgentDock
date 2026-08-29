@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 public enum AnalyticsConsent: String, Sendable {
     case undecided
@@ -72,6 +73,8 @@ public enum AnalyticsEventName: String, CaseIterable, Sendable {
     case error = "error"
     case performance = "performance"
     case featureAdoption = "feature_adoption"
+    case profileInventory = "profile_inventory"
+    case usageSnapshot = "usage_snapshot"
 }
 
 public enum AnalyticsSurface: String, CaseIterable, Sendable {
@@ -89,13 +92,14 @@ public enum AnalyticsAction: String, CaseIterable, Sendable {
     case updateChecked, updateAvailable, updateDownloadStarted, updateDownloaded
     case updateInstallStarted, updateCycleCompleted, updatePreferenceChanged
     case appearanceChanged, defaultViewChanged, activityRefreshChanged, statusVisibilityChanged
+    case observed
 }
 
 public enum AnalyticsOutcome: String, CaseIterable, Sendable {
     case succeeded, failed, cancelled, unavailable, rejected, noChange
 }
 
-public enum AnalyticsProvider: String, CaseIterable, Sendable {
+public enum AnalyticsProvider: String, CaseIterable, Sendable, Hashable {
     case codex, claude, mixed, none
 }
 
@@ -111,7 +115,56 @@ public enum AnalyticsFeature: String, CaseIterable, Sendable {
 public enum AnalyticsErrorCode: String, CaseIterable, Sendable {
     case storeUnavailable, persistenceFailed, providerNotFound, signatureRejected
     case launchFailed, closeFailed, shortcutFailed, transcriptUnavailable
-    case refreshFailed, updateUnavailable, invalidConfiguration, operationBusy, unknownSafe
+    case refreshFailed, rateLimitUnavailable, updateUnavailable, invalidConfiguration
+    case operationBusy, unknownSafe
+}
+
+public enum AnalyticsProfileScope: String, CaseIterable, Sendable, Hashable {
+    case managed, official
+}
+
+public enum AnalyticsPlanTier: String, CaseIterable, Sendable, Hashable {
+    case free, plus, pro, max, team, business, enterprise, education, unknown
+
+    public init(providerValue: String?) {
+        let normalized = providerValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+        switch normalized {
+        case "free": self = .free
+        case "plus": self = .plus
+        case "pro": self = .pro
+        case "max", "max-5x", "max-20x": self = .max
+        case "team", "teams": self = .team
+        case "business": self = .business
+        case "enterprise": self = .enterprise
+        case "education", "edu": self = .education
+        default: self = .unknown
+        }
+    }
+}
+
+public enum AnalyticsUsageBucket: String, CaseIterable, Sendable, Hashable {
+    case zero, under25, percent25To49, percent50To74, percent75To89
+    case percent90To99, atOrOver100
+
+    public init(usedPercent: Double) {
+        let value = usedPercent.isFinite ? max(0, usedPercent) : 0
+        switch value {
+        case 0: self = .zero
+        case ..<25: self = .under25
+        case ..<50: self = .percent25To49
+        case ..<75: self = .percent50To74
+        case ..<90: self = .percent75To89
+        case ..<100: self = .percent90To99
+        default: self = .atOrOver100
+        }
+    }
+}
+
+public enum AnalyticsLimitWindow: String, CaseIterable, Sendable, Hashable {
+    case primary, secondary
 }
 
 public enum AnalyticsDurationBucket: String, CaseIterable, Sendable {
@@ -144,7 +197,7 @@ public enum AnalyticsCountBucket: String, CaseIterable, Sendable {
 
 public enum AnalyticsPropertyKey: String, Sendable {
     case surface, action, outcome, provider, trigger, feature, errorCode
-    case durationBucket, countBucket, enabled
+    case durationBucket, countBucket, enabled, profileScope, planTier, usageBucket, limitWindow
 }
 
 public enum AnalyticsProperty: Sendable {
@@ -158,6 +211,10 @@ public enum AnalyticsProperty: Sendable {
     case durationBucket(AnalyticsDurationBucket)
     case countBucket(AnalyticsCountBucket)
     case enabled(Bool)
+    case profileScope(AnalyticsProfileScope)
+    case planTier(AnalyticsPlanTier)
+    case usageBucket(AnalyticsUsageBucket)
+    case limitWindow(AnalyticsLimitWindow)
 
     var key: AnalyticsPropertyKey {
         switch self {
@@ -171,6 +228,10 @@ public enum AnalyticsProperty: Sendable {
         case .durationBucket: .durationBucket
         case .countBucket: .countBucket
         case .enabled: .enabled
+        case .profileScope: .profileScope
+        case .planTier: .planTier
+        case .usageBucket: .usageBucket
+        case .limitWindow: .limitWindow
         }
     }
 
@@ -186,6 +247,10 @@ public enum AnalyticsProperty: Sendable {
         case let .durationBucket(value): value.rawValue
         case let .countBucket(value): value.rawValue
         case let .enabled(value): value
+        case let .profileScope(value): value.rawValue
+        case let .planTier(value): value.rawValue
+        case let .usageBucket(value): value.rawValue
+        case let .limitWindow(value): value.rawValue
         }
     }
 }
@@ -211,7 +276,8 @@ private extension AnalyticsEventName {
         switch self {
         case .appLifecycle, .consentDecision, .navigation, .profileLifecycle,
              .providerStatus, .launcherLifecycle, .chatUsage, .refresh,
-             .updateLifecycle, .preferenceChanged, .featureAdoption:
+             .updateLifecycle, .preferenceChanged, .featureAdoption,
+             .profileInventory, .usageSnapshot:
             [.action]
         case .error: [.errorCode]
         case .performance: [.durationBucket]
@@ -233,8 +299,23 @@ private extension AnalyticsEventName {
         case .error: [.errorCode, .surface, .provider, .action]
         case .performance: [.durationBucket, .surface, .action, .provider, .countBucket]
         case .featureAdoption: [.action, .feature, .surface, .provider]
+        case .profileInventory: [.action, .outcome, .provider, .profileScope, .planTier, .countBucket]
+        case .usageSnapshot: [
+            .action, .outcome, .provider, .profileScope, .planTier,
+            .usageBucket, .limitWindow, .countBucket
+        ]
         }
     }
+}
+
+public enum AnalyticsDeliveryFailure: String, Sendable, Equatable {
+    case transport, invalidResponse, rejected, serialization
+}
+
+public struct AnalyticsDeliveryDiagnostics: Sendable, Equatable {
+    public let successfulBatches: Int
+    public let failedBatches: Int
+    public let lastFailure: AnalyticsDeliveryFailure?
 }
 
 public struct ProductAnalyticsConfiguration: Equatable, Sendable {
@@ -283,6 +364,10 @@ public final class ProductAnalytics: @unchecked Sendable {
     private var pendingEvents: [AnalyticsEvent] = []
     private var activeTasks: [UUID: URLSessionDataTask] = [:]
     private var scheduledFlush: DispatchWorkItem?
+    private var successfulBatches = 0
+    private var failedBatches = 0
+    private var lastDeliveryFailure: AnalyticsDeliveryFailure?
+    private let logger = Logger(subsystem: "dev.euforic.agentdock", category: "ProductAnalytics")
     private static let flushAt = 12
     private static let maximumPendingEvents = 48
     private static let flushDelay: TimeInterval = 5
@@ -376,6 +461,16 @@ public final class ProductAnalytics: @unchecked Sendable {
         deliveryQueue.sync { (pendingEvents.count, activeTasks.count) }
     }
 
+    public func deliveryDiagnostics() -> AnalyticsDeliveryDiagnostics {
+        deliveryQueue.sync {
+            AnalyticsDeliveryDiagnostics(
+                successfulBatches: successfulBatches,
+                failedBatches: failedBatches,
+                lastFailure: lastDeliveryFailure
+            )
+        }
+    }
+
     private func flushLocked() {
         dispatchPrecondition(condition: .onQueue(deliveryQueue))
         scheduledFlush?.cancel()
@@ -388,19 +483,41 @@ public final class ProductAnalytics: @unchecked Sendable {
         pendingEvents.removeAll(keepingCapacity: true)
         guard !batch.isEmpty else { return }
         let body: [String: Any] = ["api_key": configuration.projectToken, "batch": batch]
-        guard let data = try? JSONSerialization.data(withJSONObject: body), data.count <= 64 * 1_024 else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: body), data.count <= 64 * 1_024 else {
+            recordDeliveryFailure(.serialization)
+            return
+        }
         var request = URLRequest(url: configuration.host, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = data
         let deliveryID = UUID()
-        let task = session.dataTask(with: request) { [weak self] _, _, _ in
+        let task = session.dataTask(with: request) { [weak self] _, response, error in
             self?.deliveryQueue.async { [weak self] in
-                self?.activeTasks.removeValue(forKey: deliveryID)
+                guard let self else { return }
+                self.activeTasks.removeValue(forKey: deliveryID)
+                if let failure = Self.deliveryFailure(response: response, error: error) {
+                    self.recordDeliveryFailure(failure)
+                } else {
+                    self.successfulBatches += 1
+                }
             }
         }
         activeTasks[deliveryID] = task
         task.resume()
+    }
+
+    static func deliveryFailure(response: URLResponse?, error: Error?) -> AnalyticsDeliveryFailure? {
+        if error != nil { return .transport }
+        guard let response = response as? HTTPURLResponse else { return .invalidResponse }
+        return (200..<300).contains(response.statusCode) ? nil : .rejected
+    }
+
+    private func recordDeliveryFailure(_ failure: AnalyticsDeliveryFailure) {
+        dispatchPrecondition(condition: .onQueue(deliveryQueue))
+        failedBatches += 1
+        lastDeliveryFailure = failure
+        logger.error("Analytics delivery failed: \(failure.rawValue, privacy: .public)")
     }
 
     private static func safeVersion(_ value: String) -> String {

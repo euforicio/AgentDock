@@ -11,6 +11,11 @@ identify a person or enable automatic capture. Disabling analytics in Data & Pri
 immediately stops collection, clears pending events, and deletes the identifier.
 An explicit prior opt-out is preserved across updates.
 
+The catalog includes normalized plan tiers, coarse profile-count and quota-use
+bands, feature outcomes, and stable issue codes. It excludes exact usage,
+balances, reset times, provider limit or model names, raw errors, logs, and
+account or profile identity.
+
 Production releases use PostHog's US ingestion region. Raw-event retention
 should be limited to 90 days, and aggregate retention must not exceed 13
 months. Privacy concerns can be reported through the private security advisory

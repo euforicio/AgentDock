@@ -218,7 +218,8 @@ struct SettingsView: View {
     }
 
     private var privacy: some View {
-        SettingsPage(title: "Data & Privacy") {
+        let delivery = ProductAnalytics.shared.deliveryDiagnostics()
+        return SettingsPage(title: "Data & Privacy") {
             SettingsSectionHeader("Local Data")
             SettingsRow("Profiles and chat history are stored locally") {
                 Button("Reveal in Finder") {
@@ -239,7 +240,7 @@ struct SettingsView: View {
                 Toggle("", isOn: analyticsBinding).labelsHidden()
             }
             Text(
-                "Enabled by default. AgentDock sends only allowlisted feature actions, outcomes, safe error codes, coarse count and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
+                "Enabled by default. AgentDock sends only allowlisted feature actions, outcomes, safe error codes, normalized plan tiers, coarse profile, usage, count, and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, exact usage or balances, model names, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
@@ -248,6 +249,22 @@ struct SettingsView: View {
                 Label("Analytics delivery is not configured in this build; no events can be sent.", systemImage: "info.circle")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+            } else if model.analyticsConsent == .granted,
+                      delivery.failedBatches > 0,
+                      let failure = delivery.lastFailure {
+                Label(
+                    "Analytics delivery had \(delivery.failedBatches) issue(s) this launch. Latest: \(failure.displayName).",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            } else if model.analyticsConsent == .granted, delivery.successfulBatches > 0 {
+                Label(
+                    "Analytics delivery is working (\(delivery.successfulBatches) batch(es) sent this launch).",
+                    systemImage: "checkmark.circle"
+                )
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
             }
             Link(
                 "View exact analytics event catalog",
@@ -386,6 +403,17 @@ struct SettingsView: View {
             get: { model.analyticsConsent == .granted },
             set: { model.setAnalyticsConsent(granted: $0, surface: .settingsPrivacy) }
         )
+    }
+}
+
+private extension AnalyticsDeliveryFailure {
+    var displayName: String {
+        switch self {
+        case .transport: "network transport failure"
+        case .invalidResponse: "invalid server response"
+        case .rejected: "server rejected the batch"
+        case .serialization: "local payload serialization failure"
+        }
     }
 }
 
