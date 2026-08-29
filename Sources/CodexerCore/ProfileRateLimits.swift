@@ -6,19 +6,22 @@ public struct ProfileRateLimits: Equatable, Sendable {
     public var credits: CreditsUsage?
     public var fetchedAt: Date
     public var errorMessage: String?
+    public var warningMessage: String?
 
     public init(
         planType: String? = nil,
         buckets: [RateLimitBucket] = [],
         credits: CreditsUsage? = nil,
         fetchedAt: Date = Date(),
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        warningMessage: String? = nil
     ) {
         self.planType = planType
         self.buckets = buckets
         self.credits = credits
         self.fetchedAt = fetchedAt
         self.errorMessage = errorMessage
+        self.warningMessage = warningMessage
     }
 }
 

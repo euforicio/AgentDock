@@ -24,7 +24,7 @@ public enum DesktopProduct: String, Codable, CaseIterable, Identifiable, Sendabl
             )
         case .claude:
             DesktopProductCapabilities(
-                supportsUsageLimits: false,
+                supportsUsageLimits: true,
                 supportsActivityMetadata: true,
                 supportsLocalChats: true,
                 supportsOAuthCallbackPort: false

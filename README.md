@@ -97,13 +97,15 @@ Local transcript support is source-dependent:
 - Claude uses supported local Cowork/agent-session data. The Official Claude
   view can also include the lightweight Claude Code history index and matching
   local session files. Official and managed Claude sources expose the same
-  source-backed session, model, token, and latest locally emitted rate-limit
-  summaries. The cross-source card keeps the official installation visible
-  alongside every managed account. Limit signals are not presented as a
-  complete or live subscription quota snapshot.
+  source-backed session, model, and token summaries. When a signed-in OAuth
+  credential grants profile access, AgentDock also reads Anthropic's live
+  session, weekly, model-scoped, reset, and extra-usage status. The cross-source
+  card keeps the official installation visible alongside every managed account.
+  Local rate-limit events remain a clearly separate last-observed fallback.
 - Ordinary synced claude.ai web chats are unavailable because Claude Desktop
-  does not expose a stable local transcript contract. AgentDock does not scrape
-  cookies or browser caches.
+  does not expose a stable local transcript contract. AgentDock reads only the
+  provider-owned OAuth cache and active-organization cookie required to resolve
+  live usage; it does not index ordinary web-chat content.
 
 Indexes contain bounded list metadata, not full transcript bodies or absolute
 working directories. See [Security and privacy](docs/security.md),

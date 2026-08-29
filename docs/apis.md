@@ -56,8 +56,14 @@ profiles are derived at runtime from validated local Cowork audit records and
 are not a new persisted format. Both source types expose the same summary
 contract, including model mix, token coverage, and the latest locally emitted
 rate-limit event. Coverage prevents partially available token data from being
-mistaken for complete usage, and rate-limit events remain advisory snapshots,
-not a stable provider quota API.
+mistaken for complete usage.
+
+Live Claude limits use `GET https://api.anthropic.com/api/oauth/usage` with the
+selected provider login's in-memory access token. The response maps five-hour,
+weekly, model-scoped, reset, and extra-usage fields into `ProfileRateLimits`.
+AgentDock verifies account and organization identity through the sibling OAuth
+profile endpoint before assigning a response to an account-scoped source. It
+does not persist, rotate, refresh, or log provider credentials.
 
 ## Build and Release Environment
 

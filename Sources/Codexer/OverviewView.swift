@@ -38,12 +38,18 @@ private struct ProfileOverview: View {
             )
             .padding(.top, 18)
           } else {
+            UsageLimitsCard(
+              limits: model.rateLimits(for: profile),
+              accent: Color(hex: profile.iconColor),
+              providerName: "Claude"
+            )
+            .padding(.top, 18)
             ClaudeUsageCard(
               stats: model.stats(for: profile),
               loading: model.statsAreLoading(for: profile),
               accent: Color(hex: profile.iconColor)
             )
-            .padding(.top, 18)
+            .padding(.top, 16)
           }
 
           activity
@@ -270,6 +276,11 @@ private struct OfficialOverview: View {
             activityDestination = destination
           }
         } else {
+          UsageLimitsCard(
+            limits: model.officialClaudeRateLimits,
+            accent: .orange,
+            providerName: "Claude"
+          )
           ClaudeUsageCard(
             stats: model.officialClaudeStats,
             loading: model.officialStatsLoading,
@@ -531,10 +542,19 @@ private struct ClaudeUsageSourcesCard: View {
 private struct UsageLimitsCard: View {
   let limits: ProfileRateLimits?
   let accent: Color
+  var providerName = "Codex"
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      SectionLabel(title: "Usage Limits")
+      HStack {
+        SectionLabel(title: "Usage Limits")
+        Spacer()
+        if let plan = limits?.planType, !plan.isEmpty {
+          Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+        }
+      }
       VStack(spacing: 0) {
         if let error = limits?.errorMessage {
           Label(error, systemImage: "exclamationmark.triangle")
@@ -544,23 +564,31 @@ private struct UsageLimitsCard: View {
         } else if limits == nil {
           HStack {
             ProgressView().controlSize(.small)
-            Text("Loading Codex usage limits…")
+            Text("Loading \(providerName) usage limits…")
               .foregroundStyle(.secondary)
             Spacer()
           }
           .padding(.vertical, 10)
-        } else if let limits, limits.buckets.isEmpty {
-          Text("No Codex usage-limit data is currently available.")
+        } else if let limits, limits.buckets.isEmpty, limits.credits == nil {
+          Text("No \(providerName) usage-limit data is currently available.")
             .foregroundStyle(.secondary)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
+          if let warning = limits?.warningMessage {
+            Label(warning, systemImage: "exclamationmark.triangle")
+              .font(.system(size: 11))
+              .foregroundStyle(.orange)
+              .padding(.vertical, 8)
+              .frame(maxWidth: .infinity, alignment: .leading)
+            Divider().overlay(AgentDockPalette.divider)
+          }
           ForEach(Array((limits?.buckets ?? []).enumerated()), id: \.element.id) { index, bucket in
             VStack(spacing: 0) {
               if let primary = bucket.primary {
                 LimitRow(
                   icon: "clock",
-                  title: windowTitle(primary),
+                  title: windowTitle(primary, bucket: bucket),
                   usage: primary,
                   accent: accent
                 )
@@ -569,7 +597,7 @@ private struct UsageLimitsCard: View {
                 Divider().overlay(AgentDockPalette.divider)
                 LimitRow(
                   icon: "calendar",
-                  title: windowTitle(secondary),
+                  title: windowTitle(secondary, bucket: bucket),
                   usage: secondary,
                   accent: accent
                 )
@@ -579,16 +607,30 @@ private struct UsageLimitsCard: View {
               }
             }
           }
+          if let credits = limits?.credits {
+            Divider().overlay(AgentDockPalette.divider)
+            HStack {
+              Label("Extra usage", systemImage: "creditcard")
+                .font(.system(size: 13, weight: .medium))
+              Spacer()
+              Text(credits.balance)
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            .frame(height: 44)
+          }
         }
       }
     }
   }
 
-  private func windowTitle(_ usage: RateLimitWindowUsage) -> String {
-    guard let minutes = usage.windowDurationMins else { return "Usage window" }
-    if minutes == 10_080 { return "Weekly" }
-    if minutes % 60 == 0 { return "\(minutes / 60)-hour" }
-    return "\(minutes)-minute"
+  private func windowTitle(_ usage: RateLimitWindowUsage, bucket: RateLimitBucket) -> String {
+    let window: String
+    guard let minutes = usage.windowDurationMins else { return "\(bucket.name) usage" }
+    if minutes == 10_080 { window = "Weekly" }
+    else if minutes % 60 == 0 { window = "\(minutes / 60)-hour" }
+    else { window = "\(minutes)-minute" }
+    return bucket.id == "codex" || bucket.id == "claude" ? window : "\(bucket.name) · \(window)"
   }
 }
 
