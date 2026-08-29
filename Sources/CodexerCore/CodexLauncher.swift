@@ -368,6 +368,23 @@ public extension CodexWorkspaceLaunching {
 public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
     public init() {}
 
+    static func launchEnvironment(
+        inheriting inheritedEnvironment: [String: String],
+        codexAppURL: URL,
+        codexHomePath: String?
+    ) -> [String: String] {
+        var environment = inheritedEnvironment
+        environment["CODEX_CLI_PATH"] = codexAppURL
+            .appendingPathComponent("Contents/Resources/codex", isDirectory: false)
+            .path
+        if let codexHomePath {
+            environment["CODEX_HOME"] = codexHomePath
+        } else {
+            environment.removeValue(forKey: "CODEX_HOME")
+        }
+        return environment
+    }
+
     public func launch(configuration: IsolatedCodexLaunchConfiguration) async throws -> Int32 {
         let openConfiguration = NSWorkspace.OpenConfiguration()
         openConfiguration.activates = true
@@ -377,9 +394,11 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
         openConfiguration.arguments = [
             "--user-data-dir=\(configuration.electronUserDataPath)"
         ]
-        var environment = ProcessInfo.processInfo.environment
-        environment["CODEX_HOME"] = configuration.codexHomePath
-        openConfiguration.environment = environment
+        openConfiguration.environment = Self.launchEnvironment(
+            inheriting: ProcessInfo.processInfo.environment,
+            codexAppURL: configuration.codexAppURL,
+            codexHomePath: configuration.codexHomePath
+        )
 
         let application = try await NSWorkspace.shared.openApplication(
             at: configuration.codexAppURL,
@@ -398,9 +417,11 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
         openConfiguration.addsToRecentItems = false
         openConfiguration.allowsRunningApplicationSubstitution = false
         openConfiguration.createsNewApplicationInstance = true
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "CODEX_HOME")
-        openConfiguration.environment = environment
+        openConfiguration.environment = Self.launchEnvironment(
+            inheriting: ProcessInfo.processInfo.environment,
+            codexAppURL: codexAppURL,
+            codexHomePath: nil
+        )
 
         let application = try await NSWorkspace.shared.openApplication(
             at: codexAppURL,

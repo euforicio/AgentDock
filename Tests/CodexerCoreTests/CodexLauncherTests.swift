@@ -3,6 +3,50 @@ import XCTest
 @testable import CodexerCore
 
 final class CodexLauncherTests: XCTestCase {
+    func testManagedLaunchEnvironmentPinsBundledCLIAndSelectedHome() {
+        let appURL = URL(fileURLWithPath: "/Applications/Codex.app")
+        let inheritedEnvironment = [
+            "CODEX_CLI_PATH": "/Applications/Cursor Bridge.app/Contents/MacOS/cursor-bridge",
+            "CODEX_HOME": "/tmp/wrong-home",
+            "PRESERVED_VALUE": "unchanged"
+        ]
+
+        let environment = SystemCodexWorkspaceLauncher.launchEnvironment(
+            inheriting: inheritedEnvironment,
+            codexAppURL: appURL,
+            codexHomePath: "/tmp/selected-home"
+        )
+
+        XCTAssertEqual(
+            environment["CODEX_CLI_PATH"],
+            "/Applications/Codex.app/Contents/Resources/codex"
+        )
+        XCTAssertEqual(environment["CODEX_HOME"], "/tmp/selected-home")
+        XCTAssertEqual(environment["PRESERVED_VALUE"], "unchanged")
+    }
+
+    func testStockLaunchEnvironmentPinsBundledCLIAndRemovesManagedHome() {
+        let appURL = URL(fileURLWithPath: "/Applications/Codex.app")
+        let inheritedEnvironment = [
+            "CODEX_CLI_PATH": "/Applications/Cursor Bridge.app/Contents/MacOS/cursor-bridge",
+            "CODEX_HOME": "/tmp/wrong-home",
+            "PRESERVED_VALUE": "unchanged"
+        ]
+
+        let environment = SystemCodexWorkspaceLauncher.launchEnvironment(
+            inheriting: inheritedEnvironment,
+            codexAppURL: appURL,
+            codexHomePath: nil
+        )
+
+        XCTAssertEqual(
+            environment["CODEX_CLI_PATH"],
+            "/Applications/Codex.app/Contents/Resources/codex"
+        )
+        XCTAssertNil(environment["CODEX_HOME"])
+        XCTAssertEqual(environment["PRESERVED_VALUE"], "unchanged")
+    }
+
     func testDiscoverySeparatesMainAppProfilesAndIgnoresHelpers() {
         let profile = makeProfile(slug: "work")
         let configuration = configuration(for: profile)
