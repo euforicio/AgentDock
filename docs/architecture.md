@@ -17,7 +17,10 @@ or conversations change. See
 [`AppUpdater`](../Sources/Codexer/AppUpdater.swift) owns the single Sparkle 2
 `SPUStandardUpdaterController`. Sparkle persists the user's automatic-check
 and automatic-download preferences; AgentDock does not create a parallel
-updater preference store.
+updater preference store. Configured release builds ask Sparkle to check once
+per hour. Unless the user opts into automatic downloads, scheduled discoveries
+appear as a persistent sidebar pill; selecting it hands download progress,
+installation, and relaunch back to Sparkle's signed standard update flow.
 
 [`ProductAnalytics`](../Sources/CodexerCore/ProductAnalytics.swift) is the only
 telemetry egress boundary. It owns opt-out gating, identifier lifecycle, typed

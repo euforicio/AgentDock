@@ -25,6 +25,14 @@ enum AppUpdatePresentation: Equatable {
         }
     }
 
+    var usesCompactAvailableStyle: Bool {
+        if case .available = self {
+            true
+        } else {
+            false
+        }
+    }
+
     var buttonTitle: String {
         switch self {
         case .hidden:
@@ -51,6 +59,18 @@ enum AppUpdatePresentation: Equatable {
         case let .available(version), let .presenting(version), let .downloading(version),
              let .preparingInstallation(version), let .installing(version), let .failed(version):
             version
+        }
+    }
+
+    func completingUpdateCycle(hadError: Bool) -> AppUpdatePresentation {
+        switch self {
+        case .hidden:
+            .hidden
+        case let .available(version), let .presenting(version), let .downloading(version),
+             let .preparingInstallation(version):
+            hadError ? .failed(version: version) : .available(version: version)
+        case .installing, .failed:
+            self
         }
     }
 }
@@ -163,11 +183,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
-        if error == nil {
-            presentation = .hidden
-        } else if let version = presentation.version {
-            presentation = .failed(version: version)
-        }
+        presentation = presentation.completingUpdateCycle(hadError: error != nil)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateCycleCompleted), .outcome(error == nil ? .succeeded : .failed), .trigger(.automatic)]
