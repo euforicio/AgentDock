@@ -122,30 +122,9 @@ struct ContentView: View {
                 Spacer(minLength: 0)
 
                 if updater.presentation.isVisible {
-                    Button {
+                    SidebarUpdateButton(presentation: updater.presentation) {
                         updater.installAvailableUpdate()
-                    } label: {
-                        HStack(spacing: 6) {
-                            if updater.presentation.showsProgress {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "arrow.down.circle.fill")
-                            }
-                            Text(updater.presentation.buttonTitle)
-                                .lineLimit(1)
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
-                        .background(AgentDockPalette.blue, in: .rect(cornerRadius: 7))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(updater.presentation.showsProgress)
-                    .help(updateButtonHelp)
-                    .accessibilityLabel(updateButtonAccessibilityLabel)
                 }
             }
             .foregroundStyle(.secondary)
@@ -153,18 +132,6 @@ struct ContentView: View {
             .padding(.horizontal, 12)
             .frame(height: 48)
         }
-    }
-
-    private var updateButtonHelp: String {
-        guard let version = updater.presentation.version else { return "Install update" }
-        return "Install AgentDock \(version)"
-    }
-
-    private var updateButtonAccessibilityLabel: String {
-        guard let version = updater.presentation.version else {
-            return updater.presentation.buttonTitle
-        }
-        return "\(updater.presentation.buttonTitle) AgentDock \(version)"
     }
 
     private var searchField: some View {
@@ -401,6 +368,58 @@ struct ContentView: View {
             },
             set: { _ in }
         )
+    }
+}
+
+private struct SidebarUpdateButton: View {
+    let presentation: AppUpdatePresentation
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if presentation.showsProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                } else {
+                    Image(systemName: presentation.usesCompactAvailableStyle
+                        ? "arrow.down.to.line"
+                        : "arrow.clockwise")
+                }
+
+                if !presentation.usesCompactAvailableStyle {
+                    Text(presentation.buttonTitle)
+                        .lineLimit(1)
+                }
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, presentation.usesCompactAvailableStyle ? 0 : 11)
+            .frame(
+                width: presentation.usesCompactAvailableStyle ? 36 : nil,
+                height: 36
+            )
+            .background(AgentDockPalette.blue, in: Capsule())
+            .contentShape(Capsule())
+            .animation(.snappy(duration: 0.22), value: presentation.usesCompactAvailableStyle)
+        }
+        .buttonStyle(.plain)
+        .disabled(presentation.showsProgress)
+        .help(helpText)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var helpText: String {
+        guard let version = presentation.version else { return "Install update" }
+        return "Install AgentDock \(version)"
+    }
+
+    private var accessibilityLabel: String {
+        guard let version = presentation.version else {
+            return presentation.buttonTitle
+        }
+        return "\(presentation.buttonTitle) AgentDock \(version)"
     }
 }
 

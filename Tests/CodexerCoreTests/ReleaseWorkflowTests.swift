@@ -59,6 +59,26 @@ final class ReleaseWorkflowTests: XCTestCase {
         XCTAssertTrue(packageScript.contains("Sparkle updates must be verified before extraction"))
     }
 
+    func testPackagedAppChecksForUpdatesHourly() throws {
+        let buildScript = try String(contentsOf: repositoryRoot
+            .appendingPathComponent("script/build_app.sh"), encoding: .utf8)
+        let packageScript = try String(contentsOf: repositoryRoot
+            .appendingPathComponent("script/package_app.sh"), encoding: .utf8)
+
+        XCTAssertTrue(buildScript.contains("""
+          <key>SUScheduledCheckInterval</key>
+          <real>3600</real>
+        """))
+        XCTAssertTrue(packageScript.contains("PLIST_UPDATE_CHECK_INTERVAL"))
+        XCTAssertTrue(packageScript.contains(#"^3600([.]0+)?$"#))
+        XCTAssertTrue(packageScript.contains("Sparkle update checks must run hourly"))
+        XCTAssertTrue(buildScript.contains("""
+          <key>SUAutomaticallyUpdate</key>
+          <false/>
+        """))
+        XCTAssertTrue(packageScript.contains("Sparkle updates must wait for the update pill by default"))
+    }
+
     private var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
