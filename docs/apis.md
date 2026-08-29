@@ -43,8 +43,10 @@ not use a generic Electron profile flag for Claude.
 - Shortcut configuration plist: binds a generated shortcut to one provider,
   profile root, and ownership identity.
 - Chat indexes: versioned, bounded summary metadata with relative source paths.
-- Analytics consent: `undecided`, `denied`, or `granted` in UserDefaults. A
-  random installation UUID exists only while granted and is deleted on opt-out.
+- Analytics state: `undecided`, `denied`, or `granted` in UserDefaults. The
+  analytics boundary promotes only `undecided` to the default `granted` state.
+  A random installation UUID exists only while granted and is deleted on
+  opt-out; an explicit `denied` state persists across launches and upgrades.
 
 Readers validate containment, type, ownership, and size before using persisted
 paths or provider records.

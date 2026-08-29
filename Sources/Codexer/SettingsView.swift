@@ -224,12 +224,12 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
             .padding(.vertical, 12)
 
-            SettingsSectionHeader("Optional Product Analytics")
+            SettingsSectionHeader("Product Analytics")
             SettingsRow("Share pseudonymous product analytics", height: 56) {
                 Toggle("", isOn: analyticsBinding).labelsHidden()
             }
             Text(
-                "Off by default. When enabled, AgentDock sends only allowlisted feature actions, outcomes, safe error codes, coarse count and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
+                "Enabled by default. AgentDock sends only allowlisted feature actions, outcomes, safe error codes, coarse count and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)

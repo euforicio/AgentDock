@@ -19,12 +19,37 @@ final class ProductAnalyticsTests: XCTestCase {
         super.tearDown()
     }
 
-    func testConsentDefaultsToUndecidedAndDoesNotCreateIdentifier() {
+    func testAnalyticsDefaultsToGrantedAndCreatesIdentifier() {
         let store = AnalyticsConsentStore(defaults: defaults)
         XCTAssertEqual(store.consent, .undecided)
         XCTAssertNil(store.installationID)
-        XCTAssertNil(defaults.object(forKey: "AgentDock.analyticsConsent.v1"))
-        XCTAssertNil(defaults.object(forKey: "AgentDock.analyticsInstallationID.v1"))
+
+        _ = ProductAnalytics(consentStore: store, configuration: nil)
+
+        XCTAssertEqual(store.consent, .granted)
+        XCTAssertNotNil(store.installationID)
+        XCTAssertEqual(defaults.string(forKey: "AgentDock.analyticsConsent.v1"), "granted")
+        XCTAssertNotNil(defaults.string(forKey: "AgentDock.analyticsInstallationID.v1"))
+    }
+
+    func testExplicitOptOutSurvivesDefaultEnablement() {
+        let store = AnalyticsConsentStore(defaults: defaults)
+        store.denyAndDeleteIdentifier()
+
+        _ = ProductAnalytics(consentStore: store, configuration: nil)
+
+        XCTAssertEqual(store.consent, .denied)
+        XCTAssertNil(store.installationID)
+    }
+
+    func testInvalidPersistedConsentFailsClosed() {
+        defaults.set("unexpected", forKey: "AgentDock.analyticsConsent.v1")
+        let store = AnalyticsConsentStore(defaults: defaults)
+
+        _ = ProductAnalytics(consentStore: store, configuration: nil)
+
+        XCTAssertEqual(store.consent, .denied)
+        XCTAssertNil(store.installationID)
     }
 
     func testGrantPersistsStableIdentifierAndOptOutDeletesIt() {
@@ -59,6 +84,7 @@ final class ProductAnalyticsTests: XCTestCase {
 
     func testPayloadIsConsentGatedAndContainsOnlyAllowlistedContext() throws {
         let store = AnalyticsConsentStore(defaults: defaults)
+        store.denyAndDeleteIdentifier()
         let configuration = try XCTUnwrap(ProductAnalyticsConfiguration(
             projectToken: "phc_synthetic_public_token_123456",
             host: "https://eu.i.posthog.com"

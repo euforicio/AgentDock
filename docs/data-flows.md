@@ -59,17 +59,19 @@ Full transcript bodies and tool output are not stored in the summary index.
 Malformed, partial, and unsupported events remain visible instead of silently
 disappearing.
 
-## Optional Analytics
+## Product Analytics
 
-1. Before explicit consent, capture exits without a payload, network request,
-   or installation identifier.
-2. Opt-in creates a random UUID unrelated to local or provider data.
+1. On first initialization, an undecided installation is enabled by default and
+   receives a random UUID unrelated to local or provider data.
+2. An explicit prior opt-out remains denied and capture exits without a payload,
+   network request, or installation identifier.
 3. Call sites submit closed enum events to the single core boundary.
 4. The boundary validates properties, adds minimal platform context, disables
    GeoIP/person profiles, and holds at most 48 events in memory.
 5. Up to twelve events are sent in a bounded HTTPS batch after at most five
    seconds. Failures are dropped without logs or persistent retries.
-6. Opt-out synchronously purges pending events and deletes the UUID.
+6. Opt-out synchronously purges pending events and deletes the UUID; re-enabling
+   creates an unlinkable replacement.
 
 No profile, provider-account, chat, transcript, session, filesystem, command,
 configuration, raw error, log, or crash content enters this flow.

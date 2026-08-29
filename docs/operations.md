@@ -24,7 +24,7 @@ and runs DMG integrity verification. The ZIP contains `AgentDock.app` at its
 root, as required by Sparkle's archive extractor. An ad-hoc local build has no
 Sparkle public key and keeps update checks disabled.
 
-It also has no PostHog configuration, so optional analytics cannot leave the
+It also has no PostHog configuration, so product analytics cannot leave the
 process. Production analytics require the two repository variables described
 in [Product analytics](analytics.md). Configure them only after reviewing the
 project region, IP capture, person profiles, access, and retention. The build

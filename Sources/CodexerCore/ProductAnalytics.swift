@@ -14,7 +14,10 @@ public struct AnalyticsConsentStore: @unchecked Sendable {
     }
 
     public var consent: AnalyticsConsent {
-        defaults.string(forKey: Key.consent).flatMap(AnalyticsConsent.init(rawValue:)) ?? .undecided
+        guard let storedValue = defaults.string(forKey: Key.consent) else {
+            return .undecided
+        }
+        return AnalyticsConsent(rawValue: storedValue) ?? .denied
     }
 
     public var installationID: UUID? {
@@ -22,6 +25,12 @@ public struct AnalyticsConsentStore: @unchecked Sendable {
               let value = defaults.string(forKey: Key.installationID)
         else { return nil }
         return UUID(uuidString: value)
+    }
+
+    @discardableResult
+    public func enableByDefaultIfUndecided() -> UUID? {
+        guard consent == .undecided else { return installationID }
+        return grant()
     }
 
     @discardableResult
@@ -285,6 +294,7 @@ public final class ProductAnalytics: @unchecked Sendable {
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         architecture: String = ProductAnalytics.currentArchitecture
     ) {
+        consentStore.enableByDefaultIfUndecided()
         self.consentStore = consentStore
         self.configuration = configuration
         self.appVersion = Self.safeVersion(appVersion)

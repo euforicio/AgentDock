@@ -395,7 +395,10 @@ struct ContentView: View {
 
     private var analyticsConsentBinding: Binding<Bool> {
         Binding(
-            get: { model.analyticsConsent == .undecided },
+            get: {
+                AnalyticsConsentView.presentationEnabled
+                    && model.analyticsConsent == .undecided
+            },
             set: { _ in }
         )
     }

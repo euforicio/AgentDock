@@ -1,8 +1,9 @@
 # Privacy-First Product Analytics
 
-AgentDock product analytics are optional, off by default, and unavailable until
-the user explicitly chooses **Allow Analytics**. Declining changes no product
-feature. Consent can be revoked immediately in **Settings → Data & Privacy**.
+AgentDock product analytics are enabled by default and can be disabled
+immediately in **Settings → Data & Privacy** without changing any product
+feature. An explicit opt-out is preserved across upgrades. The consent sheet is
+retained in source but its presentation flag is currently disabled.
 
 AgentDock uses a small first-party HTTPS client rather than the PostHog Swift
 SDK. The official SDK supports macOS, but currently defaults several collection
@@ -23,10 +24,10 @@ larger, less auditable boundary than AgentDock needs.
 
 ## Collection and Delivery Contract
 
-- A random UUID is created only after opt-in and is not derived from a device,
+- A random UUID is created when analytics first initializes and is not derived from a device,
   account, profile, provider, filesystem, or hardware identifier.
-- The UUID stays stable while consent is enabled. Opt-out synchronously clears
-  pending events and deletes it; later opt-in creates an unlinkable UUID.
+- The UUID stays stable while analytics is enabled. Opt-out synchronously clears
+  pending events and deletes it; later re-enabling creates an unlinkable UUID.
 - Events stay in memory for at most five seconds or twelve events. The queue is
   capped at 48 events, never written to disk, and discarded on delivery failure
   or app exit. Requests are capped at 64 KiB.
@@ -50,7 +51,7 @@ read from provider data.
 | Event | Allowed product properties | Purpose |
 | --- | --- | --- |
 | `app_lifecycle` | `action`, `trigger`, `countBucket` | First/return launch and coarse activation context. |
-| `consent_decision` | `action`, `surface` | Opt-in completion. Denial/revocation is not transmitted. |
+| `consent_decision` | `action`, `surface` | User-initiated re-enablement. Denial/revocation is not transmitted. |
 | `navigation` | `action`, `surface`, `provider` | Overview, chats, advanced, and settings adoption. |
 | `profile_lifecycle` | `action`, `outcome`, `provider`, `countBucket`, `durationBucket` | Create, restore, edit, remove, and delete funnels without identity. |
 | `provider_status` | `action`, `outcome`, `provider` | Discovery, configuration, validation, and compatibility. |
@@ -84,10 +85,10 @@ reuse a project containing identified users.
 5. Add the public token and regional host as GitHub Actions repository
    variables `POSTHOG_PROJECT_TOKEN` and `POSTHOG_HOST`. Never add a personal or
    project secret API key to the app or build.
-6. Build a release, inspect the `AgentDockPostHog*` Info.plist values, and opt
-   in from a synthetic installation. Compare received keys with this catalog.
+6. Build a release, inspect the `AgentDockPostHog*` Info.plist values, and
+   launch a synthetic installation. Compare received keys with this catalog.
 
-Without both valid variables, analytics delivery is disabled even after opt-in.
+Without both valid variables, analytics delivery remains disabled.
 
 ## Dashboards, Funnels, Cohorts, and Retention
 
@@ -97,8 +98,8 @@ trends; latency buckets; and feature/surface adoption.
 
 Create these funnels:
 
-- activation: consent granted → profile created/restored successfully →
-  launcher opened successfully within 7 days;
+- activation: app launched → profile created/restored successfully → launcher
+  opened successfully within 7 days;
 - shortcut: profile created/restored → shortcut installed → shortcut-triggered
   open;
 - chats: launcher opened → chats listed → transcript opened;
@@ -107,9 +108,9 @@ Create these funnels:
 Create **activated**, **profile-only**, **shortcut adopter**, **chat adopter**,
 **updates enabled**, and **recent safe error** cohorts only from this catalog.
 Use weekly retention with successful activation as the start and
-`app_lifecycle` as the return event. Report opt-in separately: declined users
-are intentionally invisible and must not be inferred or reidentified. Do not
-use person profiles, session views, or identity merges.
+`app_lifecycle` as the return event. Opted-out users are intentionally invisible
+and must not be inferred or reidentified. Do not use person profiles, session
+views, or identity merges.
 
 ## Deletion and Incident Handling
 

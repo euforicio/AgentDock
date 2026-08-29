@@ -84,8 +84,8 @@ permanent deletion is a separate confirmed action.
 ## Local Data and Privacy
 
 AgentDock is local-first. It does not provide cloud synchronization or upload
-managed profile data. Optional pseudonymous product analytics are disabled by
-default, require explicit consent, and can be revoked immediately. They never
+managed profile data. Pseudonymous product analytics are enabled by default
+and can be disabled immediately in Settings. They never
 include profile, account, path, command, prompt, chat, transcript, session,
 configuration, log, or crash content. AgentDock stores profile metadata and indexes under
 `~/Library/Application Support/AgentDock/` and creates shortcuts under

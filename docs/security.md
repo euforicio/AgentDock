@@ -51,14 +51,15 @@ from validated supported local sources.
 AgentDock does not provide cloud synchronization, scrape browser cookies, or
 read ordinary web-chat caches.
 
-## Optional Product Analytics
+## Product Analytics
 
-Analytics are a separate explicit opt-in boundary implemented in
+Analytics are a separate default-on, immediately revocable boundary implemented in
 [`ProductAnalytics.swift`](../Sources/CodexerCore/ProductAnalytics.swift).
 Only closed typed events can be batched to the configured regional PostHog
 endpoint. Events never carry source content or local identifiers; GeoIP and
 person-profile processing are disabled, and queues exist only in bounded
-memory. Opt-out clears the queue and random identifier. The public project
+memory. Explicit opt-outs persist across upgrades and clear the queue and
+random identifier. The public project
 token is release configuration, not a credential; no private PostHog key
 belongs in the app. See the [complete catalog](analytics.md).
 
