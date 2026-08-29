@@ -547,7 +547,7 @@ private struct UsageLimitsCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack {
-        SectionLabel(title: "Usage Limits")
+        SectionLabel(title: limits?.apiUsage == nil ? "Usage Limits" : "API Usage")
         Spacer()
         if let plan = limits?.planType, !plan.isEmpty {
           Text(plan.replacingOccurrences(of: "_", with: " ").capitalized)
@@ -569,8 +569,12 @@ private struct UsageLimitsCard: View {
             Spacer()
           }
           .padding(.vertical, 10)
-        } else if let limits, limits.buckets.isEmpty, limits.credits == nil {
-          Text("No \(providerName) usage-limit data is currently available.")
+        } else if let limits,
+                  limits.buckets.isEmpty,
+                  limits.credits == nil,
+                  limits.apiUsage == nil
+        {
+          Text("No \(providerName) usage data is currently available.")
             .foregroundStyle(.secondary)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -606,6 +610,24 @@ private struct UsageLimitsCard: View {
                 Divider().overlay(AgentDockPalette.divider)
               }
             }
+          }
+          if let usage = limits?.apiUsage {
+            if !(limits?.buckets.isEmpty ?? true) {
+              Divider().overlay(AgentDockPalette.divider)
+            }
+            HStack {
+              Label("Last 7 days", systemImage: "chart.bar")
+                .font(.system(size: 13, weight: .medium))
+              Spacer()
+              VStack(alignment: .trailing, spacing: 2) {
+                Text("\(usage.totalTokens.formatted()) tokens")
+                  .font(.system(size: 12).monospacedDigit())
+                Text("\(usage.requestCount.formatted()) requests")
+                  .font(.system(size: 11).monospacedDigit())
+                  .foregroundStyle(.secondary)
+              }
+            }
+            .frame(height: 54)
           }
           if let credits = limits?.credits {
             Divider().overlay(AgentDockPalette.divider)

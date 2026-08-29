@@ -4,6 +4,7 @@ public struct ProfileRateLimits: Equatable, Sendable {
     public var planType: String?
     public var buckets: [RateLimitBucket]
     public var credits: CreditsUsage?
+    public var apiUsage: APIUsageSummary?
     public var fetchedAt: Date
     public var errorMessage: String?
     public var warningMessage: String?
@@ -12,6 +13,7 @@ public struct ProfileRateLimits: Equatable, Sendable {
         planType: String? = nil,
         buckets: [RateLimitBucket] = [],
         credits: CreditsUsage? = nil,
+        apiUsage: APIUsageSummary? = nil,
         fetchedAt: Date = Date(),
         errorMessage: String? = nil,
         warningMessage: String? = nil
@@ -19,9 +21,39 @@ public struct ProfileRateLimits: Equatable, Sendable {
         self.planType = planType
         self.buckets = buckets
         self.credits = credits
+        self.apiUsage = apiUsage
         self.fetchedAt = fetchedAt
         self.errorMessage = errorMessage
         self.warningMessage = warningMessage
+    }
+}
+
+public struct APIUsageSummary: Equatable, Sendable {
+    public var inputTokens: Int64
+    public var outputTokens: Int64
+    public var cachedInputTokens: Int64
+    public var requestCount: Int64
+    public var startsAt: Date
+    public var endsAt: Date
+
+    public var totalTokens: Int64 {
+        inputTokens + outputTokens
+    }
+
+    public init(
+        inputTokens: Int64,
+        outputTokens: Int64,
+        cachedInputTokens: Int64,
+        requestCount: Int64,
+        startsAt: Date,
+        endsAt: Date
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cachedInputTokens = cachedInputTokens
+        self.requestCount = requestCount
+        self.startsAt = startsAt
+        self.endsAt = endsAt
     }
 }
 

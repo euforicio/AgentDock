@@ -52,6 +52,27 @@ not use a generic Electron profile flag for Claude.
 Readers validate containment, type, ownership, and size before using persisted
 paths or provider records.
 
+Codex usage resolution follows the active user-level provider configuration:
+
+- An omitted `model_provider`, or `model_provider = "openai"`, uses the bundled
+  Codex app-server's `account/rateLimits/read` method.
+- A selected custom provider with a matching
+  `model_providers.<id>.base_url` uses
+  `GET <base_url>/organization/usage/completions` with a rolling seven-day
+  range, one-day buckets, and a seven-bucket limit. AgentDock applies configured
+  static headers, environment-backed headers, bearer-token environment keys,
+  and query parameters without persisting or logging their values.
+- A selected non-OpenAI provider without a usable custom-provider definition
+  reports usage as unavailable. It does not fall back to an unrelated OpenAI
+  account limit.
+
+The compatible response follows OpenAI's organization completions usage page:
+`data` contains time buckets, and each bucket's `results` contains
+`input_tokens`, `output_tokens`, `input_cached_tokens`, and
+`num_model_requests`. AgentDock aggregates the returned buckets into a
+seven-day API usage summary. This endpoint reports activity, not an allowance
+percentage or billing quota.
+
 Claude activity and token summaries for official installations and managed
 profiles are derived at runtime from validated local Cowork audit records and
 are not a new persisted format. Both source types expose the same summary

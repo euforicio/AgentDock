@@ -48,11 +48,12 @@ public protocol ProfileStatsScanning: Sendable {
 extension ProfileStatsScanner: ProfileStatsScanning {}
 
 public protocol ProfileRateLimitFetching: Sendable {
-    func fetchRateLimits(for profile: CodexProfile, codexAppURL: URL) -> ProfileRateLimits
-    func fetchRateLimits(codexHomeURL: URL, codexAppURL: URL) -> ProfileRateLimits
+    func fetchRateLimits(for profile: CodexProfile, codexAppURL: URL) async -> ProfileRateLimits
+    func fetchRateLimits(codexHomeURL: URL, codexAppURL: URL) async -> ProfileRateLimits
 }
 
 extension AppServerRateLimitClient: ProfileRateLimitFetching {}
+extension CodexRateLimitClient: ProfileRateLimitFetching {}
 
 public protocol ShortcutManaging: Sendable {
     func installShortcut(for profile: CodexProfile, codexAppURL: URL) throws

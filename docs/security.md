@@ -51,6 +51,16 @@ from validated supported local sources.
 AgentDock does not provide cloud synchronization, scrape browser cookies, or
 read ordinary web-chat caches.
 
+Custom Codex usage refresh is a separate provider egress boundary. AgentDock
+reads only the active provider id and its matching provider definition from a
+bounded, regular, non-symlink `config.toml`. Custom usage requests permit HTTPS
+or loopback-only HTTP, reject URL credentials and unsafe schemes, and allow
+redirects only within the same safe origin. Configured header values,
+environment-backed values, and bearer tokens exist only on the request; they
+are not persisted, logged, surfaced in raw errors, or included in analytics.
+Responses are time- and size-bounded. A failed custom-provider request fails
+closed instead of exposing the profile's unrelated OpenAI account quota.
+
 ## Product Analytics
 
 Analytics are a separate default-on, immediately revocable boundary implemented in

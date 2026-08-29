@@ -39,6 +39,13 @@ failures temporarily suppress automatic retries (including provider-supplied
 bypass freshness and failure cooldowns; navigation, profile launch, and the
 automatic activity timer cannot.
 
+Codex usage refresh is provider-aware. The built-in OpenAI provider uses the
+bundled Codex app-server, while a selected custom provider uses its configured
+OpenAI-compatible `/organization/usage/completions` endpoint. Provider
+configuration parsing, safe URL construction, request authentication, bounded
+response reading, and activity aggregation remain in `CodexerCore`; the UI
+consumes only `ProfileRateLimits`.
+
 ### Core
 
 [Sources/CodexerCore](../Sources/CodexerCore) owns the security-sensitive boundaries:
@@ -48,6 +55,7 @@ automatic activity timer cannot.
 - exact process discovery, focus, and termination;
 - shortcut creation and validation;
 - bounded subprocess execution;
+- provider-aware usage retrieval;
 - local activity and transcript scanning;
 - profile-specific MCP callback configuration.
 

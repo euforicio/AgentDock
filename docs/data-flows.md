@@ -37,6 +37,29 @@ profile shortcut remains bound to the same profile.
 The stock provider app and other managed profiles do not match the selected
 profile path.
 
+## Codex Usage Refresh
+
+1. AgentDock reads the selected profile's bounded, regular, non-symlink
+   `CODEX_HOME/config.toml`. A missing `model_provider` means the built-in
+   `openai` provider.
+2. Native OpenAI profiles retain the signed bundled app-server flow and call
+   `account/rateLimits/read` with the selected `CODEX_HOME`.
+3. For a selected custom provider, AgentDock resolves the matching
+   `model_providers.<id>.base_url` and requests its OpenAI-compatible
+   `<base_url>/organization/usage/completions` endpoint for the trailing seven
+   days, using one-day buckets.
+4. HTTPS is accepted. Plain HTTP is accepted only for loopback providers;
+   redirects must remain on the same safe origin. Requests and responses are
+   time- and size-bounded.
+5. Provider headers, environment-backed headers, bearer-token environment
+   keys, and query parameters are applied in memory. Their values and response
+   bodies are never logged or added to analytics.
+6. Returned token and model-request counts are summed into a seven-day activity
+   summary. The endpoint does not expose an allowance percentage.
+7. A missing, unsafe, unsupported, or failed custom-provider usage endpoint is
+   shown as unavailable for that provider. AgentDock never substitutes native
+   OpenAI quota for traffic sent to another provider.
+
 ## Local Chat Indexing
 
 1. [`LocalChatSession`](../Sources/CodexerCore/LocalChatSession.swift) inventories

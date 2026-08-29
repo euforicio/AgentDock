@@ -106,7 +106,7 @@ final class CodexerModel: ObservableObject {
         instanceController = DesktopInstanceController()
         shortcutInstaller = ShortcutInstaller()
         statsScanner = ProfileStatsScanner()
-        rateLimitClient = AppServerRateLimitClient()
+        rateLimitClient = CodexRateLimitClient()
         claudeUsageClient = ClaudeUsageClient()
         allowsAutomaticRefresh = true
         let storedPaths: [DesktopProduct: String?] = [
@@ -171,7 +171,7 @@ final class CodexerModel: ObservableObject {
         instanceController: any DesktopInstanceManaging = DesktopInstanceController(),
         shortcutInstaller: any ShortcutManaging = ShortcutInstaller(),
         statsScanner: any ProfileStatsScanning = ProfileStatsScanner(),
-        rateLimitClient: any ProfileRateLimitFetching = AppServerRateLimitClient(),
+        rateLimitClient: any ProfileRateLimitFetching = CodexRateLimitClient(),
         claudeUsageClient: any ClaudeUsageFetching = ClaudeUsageClient(),
         preferencesStore: AgentDockPreferencesStore = AgentDockPreferencesStore(),
         chatScanner: LocalChatScanner = LocalChatScanner(),
@@ -522,7 +522,7 @@ final class CodexerModel: ObservableObject {
         rateLimitRefreshTask = Task { [weak self] in
             let officialWorker = Task.detached(priority: .utility) {
                 replaceAll
-                    ? client.fetchRateLimits(
+                    ? await client.fetchRateLimits(
                         codexHomeURL: officialHomeURL,
                         codexAppURL: appURL
                     )
@@ -548,7 +548,7 @@ final class CodexerModel: ObservableObject {
                         group.addTask {
                             let limits = switch profile.product {
                             case .codex:
-                                client.fetchRateLimits(for: profile, codexAppURL: appURL)
+                                await client.fetchRateLimits(for: profile, codexAppURL: appURL)
                             case .claude:
                                 await claudeClient.fetchManagedUsage(
                                     claudeUserDataURL: profile.claudeUserDataPath,
@@ -572,7 +572,7 @@ final class CodexerModel: ObservableObject {
                         group.addTask {
                             let limits = switch profile.product {
                             case .codex:
-                                client.fetchRateLimits(for: profile, codexAppURL: appURL)
+                                await client.fetchRateLimits(for: profile, codexAppURL: appURL)
                             case .claude:
                                 await claudeClient.fetchManagedUsage(
                                     claudeUserDataURL: profile.claudeUserDataPath,

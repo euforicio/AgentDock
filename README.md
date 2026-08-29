@@ -98,6 +98,12 @@ configuration, log, or crash content. AgentDock stores profile metadata and inde
 Local transcript support is source-dependent:
 
 - Codex uses supported local databases and session JSONL fallbacks.
+  Native OpenAI profiles read account limits through the bundled Codex
+  app-server. When a profile selects a custom `model_provider`, AgentDock tries
+  that provider's configured OpenAI-compatible
+  `GET /organization/usage/completions` endpoint instead and shows its rolling
+  seven-day token and request totals. A custom provider is never shown with an
+  unrelated OpenAI quota.
 - Claude uses supported local Cowork/agent-session data. The Official Claude
   view can also include the lightweight Claude Code history index and matching
   local session files. Official and managed Claude sources expose the same
