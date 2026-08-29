@@ -175,7 +175,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
 
-            ForEach(profiles) { profile in
+            ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
                 ProfileSidebarRow(
                     profile: profile,
                     isSelected: !showsSettings && model.selectedProfileID == profile.id,
@@ -187,6 +187,29 @@ struct ContentView: View {
                         showsSettings = false
                         model.selectProfile(profile.id)
                         model.launch(profile)
+                    },
+                    onMove: { draggedID, placeAfter in
+                        model.reorderProfile(
+                            draggedID,
+                            relativeTo: profile.id,
+                            placeAfter: placeAfter
+                        )
+                    },
+                    onMoveUp: {
+                        guard index > profiles.startIndex else { return }
+                        _ = model.reorderProfile(
+                            profile.id,
+                            relativeTo: profiles[index - 1].id,
+                            placeAfter: false
+                        )
+                    },
+                    onMoveDown: {
+                        guard index < profiles.index(before: profiles.endIndex) else { return }
+                        _ = model.reorderProfile(
+                            profile.id,
+                            relativeTo: profiles[index + 1].id,
+                            placeAfter: true
+                        )
                     }
                 )
             }
@@ -471,6 +494,11 @@ private struct ProfileSidebarRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onOpen: () -> Void
+    let onMove: (CodexProfile.ID, Bool) -> Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+
+    private static let rowHeight: CGFloat = 46
 
     var body: some View {
         let running = model.instanceStatus(for: profile).isRunning
@@ -511,10 +539,29 @@ private struct ProfileSidebarRow: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             .accessibilityValue(running ? "Running" : "Stopped")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    onMoveDown()
+                case .decrement:
+                    onMoveUp()
+                @unknown default:
+                    break
+                }
+            }
         }
         .padding(.horizontal, 10)
-        .frame(height: 46)
+        .frame(height: Self.rowHeight)
         .background(isSelected ? AgentDockPalette.blue.opacity(0.72) : .clear, in: .rect(cornerRadius: 8))
+        .draggable(profile.id.uuidString)
+        .dropDestination(for: String.self) { items, location in
+            guard let rawID = items.first,
+                  let draggedID = CodexProfile.ID(uuidString: rawID)
+            else {
+                return false
+            }
+            return onMove(draggedID, location.y >= Self.rowHeight / 2)
+        }
     }
 }
 

@@ -38,7 +38,8 @@ not use a generic Electron profile flag for Claude.
 
 ## Persistent Formats
 
-- `profiles.json`: AgentDock-owned profile metadata.
+- `profiles.json`: AgentDock-owned profile metadata. Array order preserves the
+  user-defined managed-profile order within each provider section.
 - Profile ownership markers: bind managed directories to persisted profiles.
 - Shortcut configuration plist: binds a generated shortcut to one provider,
   profile root, and ownership identity.

@@ -227,7 +227,6 @@ public final class ProfileStore: @unchecked Sendable {
             }
             try Task.checkCancellation()
             storedProfiles.append(profile)
-            storedProfiles.sort { $0.createdAt < $1.createdAt }
             try saveUnlocked()
         } catch {
             storedProfiles = previous
@@ -307,7 +306,6 @@ public final class ProfileStore: @unchecked Sendable {
         do {
             try writeOwnershipMarker(for: profile, replacingLegacyMarker: true)
             storedProfiles.append(profile)
-            storedProfiles.sort { $0.createdAt < $1.createdAt }
             try saveUnlocked()
         } catch {
             storedProfiles = previous
@@ -420,7 +418,6 @@ public final class ProfileStore: @unchecked Sendable {
             }
             try writeOwnershipMarker(for: profile, replacingLegacyMarker: true)
             storedProfiles.append(profile)
-            storedProfiles.sort { $0.createdAt < $1.createdAt }
             try saveUnlocked()
         } catch {
             storedProfiles = previous
@@ -518,6 +515,47 @@ public final class ProfileStore: @unchecked Sendable {
     public func markLaunched(id: UUID, at date: Date = Date()) throws {
         try withStoreTransaction {
             try markLaunchedUnlocked(id: id, at: date)
+        }
+    }
+
+    public func reorderProfiles(
+        product: DesktopProduct,
+        orderedIDs: [CodexProfile.ID]
+    ) throws {
+        try withStoreTransaction {
+            try reorderProfilesUnlocked(product: product, orderedIDs: orderedIDs)
+        }
+    }
+
+    private func reorderProfilesUnlocked(
+        product: DesktopProduct,
+        orderedIDs: [CodexProfile.ID]
+    ) throws {
+        let currentProfiles = storedProfiles.filter { $0.product == product }
+        let currentIDs = currentProfiles.map(\.id)
+        guard orderedIDs.count == currentIDs.count,
+              Set(orderedIDs).count == orderedIDs.count,
+              Set(orderedIDs) == Set(currentIDs)
+        else {
+            throw ProfileStoreError.invalidProfileOrder
+        }
+        guard orderedIDs != currentIDs else { return }
+
+        let previous = storedProfiles
+        let profilesByID = Dictionary(uniqueKeysWithValues: currentProfiles.map { ($0.id, $0) })
+        var orderedIterator = orderedIDs.makeIterator()
+        for index in storedProfiles.indices where storedProfiles[index].product == product {
+            guard let id = orderedIterator.next(), let profile = profilesByID[id] else {
+                storedProfiles = previous
+                throw ProfileStoreError.invalidProfileOrder
+            }
+            storedProfiles[index] = profile
+        }
+        do {
+            try saveUnlocked()
+        } catch {
+            storedProfiles = previous
+            throw error
         }
     }
 
@@ -1250,6 +1288,7 @@ public enum ProfileStoreError: Error, LocalizedError, Equatable {
     case invalidProfileLayout(String)
     case invalidShortcutDirectory(String)
     case invalidCustomIcon
+    case invalidProfileOrder
     case invalidOwnershipMarker(String)
     case profileInUse(String)
     case deletionCleanupIncomplete([String])
@@ -1284,6 +1323,8 @@ public enum ProfileStoreError: Error, LocalizedError, Equatable {
             "Profile metadata points to an unmanaged shortcut directory: \(path)"
         case .invalidCustomIcon:
             "The selected profile icon is empty or larger than 10 MB."
+        case .invalidProfileOrder:
+            "The requested profile order does not match the saved profiles."
         case let .invalidOwnershipMarker(path):
             "AgentDock could not verify ownership of the profile data at \(path)."
         case let .profileInUse(name):

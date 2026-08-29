@@ -62,6 +62,66 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertTrue(personal.shortcutPath.path.hasPrefix(shortcutRoot.path))
     }
 
+    func testProfileOrderPersistsWithinEachProvider() throws {
+        let first = try store.createProfile(name: "First")
+        let claude = try store.createProfile(product: .claude, name: "Claude")
+        let second = try store.createProfile(name: "Second")
+        let third = try store.createProfile(name: "Third")
+
+        try store.reorderProfiles(
+            product: .codex,
+            orderedIDs: [third.id, first.id, second.id]
+        )
+
+        XCTAssertEqual(
+            store.profiles.filter { $0.product == .codex }.map(\.id),
+            [third.id, first.id, second.id]
+        )
+        XCTAssertEqual(
+            store.profiles.filter { $0.product == .claude }.map(\.id),
+            [claude.id]
+        )
+
+        let reloaded = try ProfileStore(
+            rootDirectory: root,
+            shortcutDirectory: shortcutRoot,
+            usageChecker: NeverInUseChecker()
+        )
+        XCTAssertEqual(
+            reloaded.profiles.filter { $0.product == .codex }.map(\.id),
+            [third.id, first.id, second.id]
+        )
+
+        let fourth = try reloaded.createProfile(name: "Fourth")
+        XCTAssertEqual(
+            reloaded.profiles.filter { $0.product == .codex }.map(\.id),
+            [third.id, first.id, second.id, fourth.id]
+        )
+    }
+
+    func testProfileOrderRejectsMissingOrForeignProfiles() throws {
+        let first = try store.createProfile(name: "First")
+        let second = try store.createProfile(name: "Second")
+        let claude = try store.createProfile(product: .claude, name: "Claude")
+
+        XCTAssertThrowsError(try store.reorderProfiles(
+            product: .codex,
+            orderedIDs: [first.id]
+        )) { error in
+            XCTAssertEqual(error as? ProfileStoreError, .invalidProfileOrder)
+        }
+        XCTAssertThrowsError(try store.reorderProfiles(
+            product: .codex,
+            orderedIDs: [first.id, claude.id]
+        )) { error in
+            XCTAssertEqual(error as? ProfileStoreError, .invalidProfileOrder)
+        }
+        XCTAssertEqual(
+            store.profiles.filter { $0.product == .codex }.map(\.id),
+            [first.id, second.id]
+        )
+    }
+
     func testProfileNameCannotEscapeShortcutDirectory() throws {
         let profile = try store.createProfile(name: "../../Outside")
 

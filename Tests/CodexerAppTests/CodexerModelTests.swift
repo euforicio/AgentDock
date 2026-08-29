@@ -113,6 +113,31 @@ final class CodexerModelTests: XCTestCase {
         await waitUntil { !model.isBusy(profile) }
     }
 
+    func testProfileReorderUpdatesImmediatelyAndPersists() async throws {
+        let store = try makeStore()
+        let first = try store.createProfile(name: "First")
+        let second = try store.createProfile(name: "Second")
+        let third = try store.createProfile(name: "Third")
+        let model = makeModel(store: store)
+
+        XCTAssertTrue(model.reorderProfile(
+            third.id,
+            relativeTo: first.id,
+            placeAfter: false
+        ))
+        XCTAssertEqual(model.profiles.map(\.id), [third.id, first.id, second.id])
+
+        await waitUntil { !model.storeMutationInProgress }
+        XCTAssertEqual(store.profiles.map(\.id), [third.id, first.id, second.id])
+
+        let reloaded = try ProfileStore(
+            rootDirectory: root,
+            shortcutDirectory: root.appendingPathComponent("Shortcuts"),
+            usageChecker: NeverInUseModelChecker()
+        )
+        XCTAssertEqual(reloaded.profiles.map(\.id), [third.id, first.id, second.id])
+    }
+
     func testAddProfileCompletesAndSelectsBothProducts() async throws {
         let store = try makeStore()
         let model = makeRealModel(store: store)

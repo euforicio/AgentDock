@@ -275,6 +275,86 @@ final class CodexerModel: ObservableObject {
         ))
     }
 
+    @discardableResult
+    func reorderProfile(
+        _ profileID: CodexProfile.ID,
+        relativeTo targetID: CodexProfile.ID,
+        placeAfter: Bool
+    ) -> Bool {
+        guard profileID != targetID,
+              let profile = profiles.first(where: { $0.id == profileID }),
+              let target = profiles.first(where: { $0.id == targetID }),
+              profile.product == target.product,
+              let store,
+              beginStoreMutationIfAvailable()
+        else {
+            return false
+        }
+
+        let product = profile.product
+        let currentIDs = profiles.filter { $0.product == product }.map(\.id)
+        var orderedIDs = currentIDs
+        guard let sourceIndex = orderedIDs.firstIndex(of: profileID),
+              let originalTargetIndex = orderedIDs.firstIndex(of: targetID)
+        else {
+            storeMutationInProgress = false
+            return false
+        }
+        orderedIDs.remove(at: sourceIndex)
+        let adjustedTargetIndex = originalTargetIndex - (sourceIndex < originalTargetIndex ? 1 : 0)
+        let destinationIndex = adjustedTargetIndex + (placeAfter ? 1 : 0)
+        orderedIDs.insert(profileID, at: destinationIndex)
+        guard orderedIDs != currentIDs else {
+            storeMutationInProgress = false
+            return true
+        }
+
+        let previousProfiles = profiles
+        let persistedOrder = orderedIDs
+        profiles = Self.applyingProfileOrder(
+            persistedOrder,
+            for: product,
+            to: profiles
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            defer { storeMutationInProgress = false }
+            do {
+                try await Task.detached(priority: .userInitiated) { [store, product, persistedOrder] in
+                    try store.reorderProfiles(product: product, orderedIDs: persistedOrder)
+                }.value
+                reload(refreshData: false)
+                errorMessage = nil
+            } catch {
+                profiles = previousProfiles
+                present(error)
+            }
+        }
+        return true
+    }
+
+    private static func applyingProfileOrder(
+        _ orderedIDs: [CodexProfile.ID],
+        for product: DesktopProduct,
+        to profiles: [CodexProfile]
+    ) -> [CodexProfile] {
+        let profilesByID = Dictionary(
+            uniqueKeysWithValues: profiles.lazy
+                .filter { $0.product == product }
+                .map { ($0.id, $0) }
+        )
+        var orderedIterator = orderedIDs.makeIterator()
+        return profiles.map { profile in
+            guard profile.product == product,
+                  let id = orderedIterator.next(),
+                  let orderedProfile = profilesByID[id]
+            else {
+                return profile
+            }
+            return orderedProfile
+        }
+    }
+
     func reload(refreshData: Bool = true) {
         guard let store else { return }
         profiles = store.profiles
