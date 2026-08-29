@@ -431,7 +431,7 @@ private struct SidebarUpdateButton: View {
             .animation(.snappy(duration: 0.22), value: presentation.usesCompactAvailableStyle)
         }
         .buttonStyle(.plain)
-        .disabled(presentation.showsProgress)
+        .disabled(!presentation.allowsAction)
         .help(helpText)
         .accessibilityLabel(accessibilityLabel)
     }

@@ -8,13 +8,13 @@ final class AppUpdatePresentationTests: XCTestCase {
         XCTAssertTrue(presentation.isVisible)
         XCTAssertFalse(presentation.showsProgress)
         XCTAssertTrue(presentation.usesCompactAvailableStyle)
+        XCTAssertTrue(presentation.allowsAction)
         XCTAssertEqual(presentation.buttonTitle, "Update")
         XCTAssertEqual(presentation.version, "1.2.3")
     }
 
     func testActiveUpdateStagesExposeProgressState() {
         let stages: [AppUpdatePresentation] = [
-            .presenting(version: "1.2.3"),
             .downloading(version: "1.2.3"),
             .preparingInstallation(version: "1.2.3"),
             .installing(version: "1.2.3")
@@ -23,6 +23,36 @@ final class AppUpdatePresentationTests: XCTestCase {
         XCTAssertTrue(stages.allSatisfy(\.isVisible))
         XCTAssertTrue(stages.allSatisfy(\.showsProgress))
         XCTAssertTrue(stages.allSatisfy { !$0.usesCompactAvailableStyle })
+        XCTAssertTrue(stages.allSatisfy { !$0.allowsAction })
+    }
+
+    func testPresentedSparkleWindowKeepsCompactUpdateStyle() {
+        let presentation = AppUpdatePresentation.presenting(version: "1.2.3")
+
+        XCTAssertTrue(presentation.isVisible)
+        XCTAssertFalse(presentation.showsProgress)
+        XCTAssertTrue(presentation.usesCompactAvailableStyle)
+        XCTAssertFalse(presentation.allowsAction)
+        XCTAssertEqual(presentation.buttonTitle, "Update")
+    }
+
+    func testSparkleWindowCompactsDownloadAndInstallProgress() {
+        let stages: [AppUpdatePresentation] = [
+            .downloading(version: "1.2.3"),
+            .preparingInstallation(version: "1.2.3"),
+            .installing(version: "1.2.3"),
+            .failed(version: "1.2.3")
+        ]
+
+        XCTAssertTrue(stages.allSatisfy {
+            $0.keepingCompact(whileStandardWindowIsActive: true)
+                == .presenting(version: "1.2.3")
+        })
+        XCTAssertEqual(
+            AppUpdatePresentation.downloading(version: "1.2.3")
+                .keepingCompact(whileStandardWindowIsActive: false),
+            .downloading(version: "1.2.3")
+        )
     }
 
     func testFailedUpdateOffersRetryWithoutLosingVersion() {

@@ -15,12 +15,15 @@ or conversations change. See
 [ChatsView.swift](../Sources/Codexer/ChatsView.swift).
 
 [`AppUpdater`](../Sources/Codexer/AppUpdater.swift) owns the single Sparkle 2
-`SPUStandardUpdaterController`. Sparkle persists the user's automatic-check
-and automatic-download preferences; AgentDock does not create a parallel
-updater preference store. Configured release builds ask Sparkle to check once
-per hour. Unless the user opts into automatic downloads, scheduled discoveries
-appear as a persistent sidebar pill; selecting it hands download progress,
-installation, and relaunch back to Sparkle's signed standard update flow.
+`SPUUpdater` and a user driver that preserves Sparkle's standard interface for
+manual checks. Sparkle persists the user's automatic-check and
+automatic-download preferences; AgentDock does not create a parallel updater
+preference store. Configured release builds ask Sparkle to check once per hour.
+Unless the user opts into automatic downloads, scheduled discoveries appear as
+a persistent sidebar pill. Selecting it accepts Sparkle's retained, signed
+update session directly: AgentDock shows download and installation progress in
+the sidebar while Sparkle performs verification, installation, and relaunch
+without first opening its update-choice window.
 
 [`ProductAnalytics`](../Sources/CodexerCore/ProductAnalytics.swift) is the only
 telemetry egress boundary. It owns opt-out gating, identifier lifecycle, typed

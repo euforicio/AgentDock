@@ -18,17 +18,27 @@ enum AppUpdatePresentation: Equatable {
 
     var showsProgress: Bool {
         switch self {
-        case .presenting, .downloading, .preparingInstallation, .installing:
+        case .downloading, .preparingInstallation, .installing:
             true
-        case .hidden, .available, .failed:
+        case .hidden, .available, .presenting, .failed:
             false
         }
     }
 
     var usesCompactAvailableStyle: Bool {
-        if case .available = self {
+        switch self {
+        case .available, .presenting:
             true
-        } else {
+        case .hidden, .downloading, .preparingInstallation, .installing, .failed:
+            false
+        }
+    }
+
+    var allowsAction: Bool {
+        switch self {
+        case .available, .failed:
+            true
+        case .hidden, .presenting, .downloading, .preparingInstallation, .installing:
             false
         }
     }
@@ -40,7 +50,7 @@ enum AppUpdatePresentation: Equatable {
         case .available:
             "Update"
         case .presenting:
-            "Opening…"
+            "Update"
         case .downloading:
             "Downloading…"
         case .preparingInstallation:
@@ -73,32 +83,144 @@ enum AppUpdatePresentation: Equatable {
             self
         }
     }
+
+    func keepingCompact(whileStandardWindowIsActive isActive: Bool) -> AppUpdatePresentation {
+        guard isActive, let version else { return self }
+        return .presenting(version: version)
+    }
+}
+
+@MainActor
+private final class AppUpdateUserDriver: SPUStandardUserDriver {
+    private var pendingInstallReply: ((SPUUserUpdateChoice) -> Void)?
+    private var installsNextUpdate = false
+    private var installsWithoutWindow = false
+
+    func installAvailableUpdate() -> Bool {
+        guard let reply = pendingInstallReply else {
+            installsNextUpdate = true
+            installsWithoutWindow = true
+            return false
+        }
+        pendingInstallReply = nil
+        installsWithoutWindow = true
+        reply(.install)
+        return true
+    }
+
+    override func showUpdateFound(
+        with appcastItem: SUAppcastItem,
+        state: SPUUserUpdateState,
+        reply: @escaping (SPUUserUpdateChoice) -> Void
+    ) {
+        if installsNextUpdate, !appcastItem.isInformationOnlyUpdate {
+            installsNextUpdate = false
+            reply(.install)
+            return
+        }
+        installsNextUpdate = false
+        guard !state.userInitiated else {
+            installsWithoutWindow = false
+            super.showUpdateFound(with: appcastItem, state: state, reply: reply)
+            return
+        }
+        pendingInstallReply = reply
+    }
+
+    override func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        guard !installsWithoutWindow else {
+            acknowledgement()
+            return
+        }
+        super.showUpdaterError(error, acknowledgement: acknowledgement)
+    }
+
+    override func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        guard !installsWithoutWindow else { return }
+        super.showDownloadInitiated(cancellation: cancellation)
+    }
+
+    override func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+        guard !installsWithoutWindow else { return }
+        super.showDownloadDidReceiveExpectedContentLength(expectedContentLength)
+    }
+
+    override func showDownloadDidReceiveData(ofLength length: UInt64) {
+        guard !installsWithoutWindow else { return }
+        super.showDownloadDidReceiveData(ofLength: length)
+    }
+
+    override func showDownloadDidStartExtractingUpdate() {
+        guard !installsWithoutWindow else { return }
+        super.showDownloadDidStartExtractingUpdate()
+    }
+
+    override func showExtractionReceivedProgress(_ progress: Double) {
+        guard !installsWithoutWindow else { return }
+        super.showExtractionReceivedProgress(progress)
+    }
+
+    override func showReadyToInstallAndRelaunch() async -> SPUUserUpdateChoice {
+        installsWithoutWindow ? .install : await super.showReadyToInstallAndRelaunch()
+    }
+
+    override func showInstallingUpdate(
+        withApplicationTerminated applicationTerminated: Bool,
+        retryTerminatingApplication: @escaping () -> Void
+    ) {
+        guard !installsWithoutWindow else { return }
+        super.showInstallingUpdate(
+            withApplicationTerminated: applicationTerminated,
+            retryTerminatingApplication: retryTerminatingApplication
+        )
+    }
+
+    override func dismissUpdateInstallation() {
+        pendingInstallReply = nil
+        installsNextUpdate = false
+        let hadWindowlessInstallation = installsWithoutWindow
+        installsWithoutWindow = false
+        if !hadWindowlessInstallation {
+            super.dismissUpdateInstallation()
+        }
+    }
 }
 
 @MainActor
 final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate {
-    private var controller: SPUStandardUpdaterController!
+    private var updater: SPUUpdater!
+    private var userDriver: AppUpdateUserDriver!
+    private var standardUpdateWindowIsActive = false
     @Published private(set) var presentation = AppUpdatePresentation.hidden
-    let isConfigured: Bool
+    private(set) var isConfigured: Bool
 
     init(bundle: Bundle = .main) {
         let feedURL = bundle.object(forInfoDictionaryKey: "SUFeedURL") as? String
         let publicKey = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
         isConfigured = feedURL?.hasPrefix("https://") == true && !(publicKey ?? "").isEmpty
         super.init()
-        controller = SPUStandardUpdaterController(
-            startingUpdater: isConfigured,
-            updaterDelegate: self,
-            userDriverDelegate: self
+        userDriver = AppUpdateUserDriver(hostBundle: bundle, delegate: self)
+        updater = SPUUpdater(
+            hostBundle: bundle,
+            applicationBundle: bundle,
+            userDriver: userDriver,
+            delegate: self
         )
+        if isConfigured {
+            do {
+                try updater.start()
+            } catch {
+                isConfigured = false
+            }
+        }
     }
 
     var automaticallyChecksForUpdates: Bool {
-        isConfigured && controller.updater.automaticallyChecksForUpdates
+        isConfigured && updater.automaticallyChecksForUpdates
     }
 
     var automaticallyDownloadsUpdates: Bool {
-        isConfigured && controller.updater.automaticallyDownloadsUpdates
+        isConfigured && updater.automaticallyDownloadsUpdates
     }
 
     func checkForUpdates() {
@@ -107,25 +229,27 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
             .updateLifecycle,
             [.action(.updateChecked), .trigger(.user)]
         ))
-        controller.checkForUpdates(nil)
+        updater.checkForUpdates()
     }
 
     func installAvailableUpdate() {
-        guard isConfigured, let version = presentation.version, !presentation.showsProgress else { return }
+        guard isConfigured, let version = presentation.version, presentation.allowsAction else { return }
         presentation = .presenting(version: version)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateChecked), .trigger(.user)]
         ))
-        // Sparkle retains the scheduled update session. Checking again brings its
-        // signed, native download and installation UI into focus.
-        controller.checkForUpdates(nil)
+        // Scheduled checks retain their signed update session. Accept that session
+        // directly so the sidebar can own progress without opening Sparkle's window.
+        if !userDriver.installAvailableUpdate() {
+            updater.checkForUpdates()
+        }
     }
 
     func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
         guard isConfigured else { return }
         objectWillChange.send()
-        controller.updater.automaticallyChecksForUpdates = enabled
+        updater.automaticallyChecksForUpdates = enabled
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updatePreferenceChanged), .trigger(.settings), .enabled(enabled)]
@@ -135,7 +259,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
     func setAutomaticallyDownloadsUpdates(_ enabled: Bool) {
         guard isConfigured else { return }
         objectWillChange.send()
-        controller.updater.automaticallyDownloadsUpdates = enabled
+        updater.automaticallyDownloadsUpdates = enabled
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updatePreferenceChanged), .trigger(.settings), .enabled(enabled)]
@@ -151,7 +275,9 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
     }
 
     func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
-        presentation = .downloading(version: item.displayVersionString)
+        presentation = AppUpdatePresentation
+            .downloading(version: item.displayVersionString)
+            .keepingCompact(whileStandardWindowIsActive: standardUpdateWindowIsActive)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateDownloadStarted), .trigger(.automatic)]
@@ -159,7 +285,9 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
     }
 
     func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
-        presentation = .preparingInstallation(version: item.displayVersionString)
+        presentation = AppUpdatePresentation
+            .preparingInstallation(version: item.displayVersionString)
+            .keepingCompact(whileStandardWindowIsActive: standardUpdateWindowIsActive)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateDownloaded), .outcome(.succeeded), .trigger(.automatic)]
@@ -167,7 +295,9 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
     }
 
     func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error) {
-        presentation = .failed(version: item.displayVersionString)
+        presentation = AppUpdatePresentation
+            .failed(version: item.displayVersionString)
+            .keepingCompact(whileStandardWindowIsActive: standardUpdateWindowIsActive)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateDownloaded), .outcome(.failed), .trigger(.automatic)]
@@ -175,7 +305,9 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
     }
 
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
-        presentation = .installing(version: item.displayVersionString)
+        presentation = AppUpdatePresentation
+            .installing(version: item.displayVersionString)
+            .keepingCompact(whileStandardWindowIsActive: standardUpdateWindowIsActive)
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updateInstallStarted), .trigger(.automatic)]
@@ -207,14 +339,18 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
         forUpdate update: SUAppcastItem,
         state: SPUUserUpdateState
     ) {
-        if !handleShowingUpdate {
-            presentation = .available(version: update.displayVersionString)
-        }
+        standardUpdateWindowIsActive = handleShowingUpdate
+        presentation = handleShowingUpdate
+            ? .presenting(version: update.displayVersionString)
+            : .available(version: update.displayVersionString)
     }
 
     func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        if presentation == .available(version: update.displayVersionString) {
-            presentation = .presenting(version: update.displayVersionString)
-        }
+        standardUpdateWindowIsActive = true
+        presentation = .presenting(version: update.displayVersionString)
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        standardUpdateWindowIsActive = false
     }
 }
