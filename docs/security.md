@@ -63,10 +63,11 @@ random identifier. The public project
 token is release configuration, not a credential; no private PostHog key
 belongs in the app. See the [complete catalog](analytics.md).
 
-Claude usage summaries do not read or copy OAuth tokens, Keychain entries, or
-browser session state. Account names remain the user-assigned AgentDock profile
-labels; AgentDock does not infer an identity or subscription tier from private
-browser storage.
+Claude usage summaries for official installations and managed profiles do not
+read or copy OAuth tokens, Keychain entries, or browser session state. Managed
+account names remain the user-assigned AgentDock profile labels, and the stock
+source is identified only as the official installation. AgentDock does not
+infer an identity or subscription tier from private browser storage.
 
 ## Repository and Release Hygiene
 

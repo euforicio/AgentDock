@@ -49,10 +49,8 @@ private struct ProfileOverview: View {
           activity
             .padding(.top, 20)
 
-          if profile.product == .claude,
-             model.profiles.filter({ $0.product == .claude }).count > 1
-          {
-            ClaudeProfilesCard(selectedProfile: profile)
+          if profile.product == .claude {
+            ClaudeUsageSourcesCard(selection: .profile(profile.id))
               .padding(.top, 16)
           }
 
@@ -186,73 +184,8 @@ private struct ProfileOverview: View {
     let stats = model.stats(for: profile)
     let loading = model.statsAreLoading(for: profile)
     return VStack(alignment: .leading, spacing: 8) {
-      SectionLabel(title: "Activity")
-      VStack(spacing: 0) {
-        ActivityRow(
-          icon: "externaldrive",
-          title: "Storage",
-          value: loading
-            ? "Loading…"
-            : ByteCountFormatter.agentDock.string(fromByteCount: stats.dataBytes)
-        ) {
-          activityDestination = .storage
-        }
-        if profile.product == .codex {
-          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
-          ActivityRow(
-            icon: "doc.text",
-            title: "Logs, last 7 days",
-            value: loading
-              ? "Loading…"
-              : "\(stats.weeklyErrors) errors · \(stats.weeklyWarnings) warnings",
-            valueColor: stats.weeklyErrors > 0
-              ? .red : (stats.weeklyWarnings > 0 ? .orange : .secondary)
-          ) {
-            activityDestination = .logs
-          }
-          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
-          ActivityRow(
-            icon: "waveform.path.ecg",
-            title: "Latest local activity",
-            value: loading
-              ? "Loading…"
-              : stats.lastActivityAt?.formatted(date: .abbreviated, time: .shortened)
-                ?? "No activity yet"
-          ) {
-            activityDestination = .lastActivity
-          }
-          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
-          ActivityRow(
-            icon: "archivebox",
-            title: "Archived",
-            value: loading ? "Loading…" : "\(stats.archivedSessions)"
-          ) {
-            activityDestination = .archived
-          }
-        } else {
-          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
-          ActivityRow(
-            icon: "text.bubble",
-            title: "Local sessions",
-            value: loading ? "Loading…" : stats.totalSessions.formatted()
-          ) {
-            activityDestination = .lastActivity
-          }
-          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
-          ActivityRow(
-            icon: "waveform.path.ecg",
-            title: "Latest local activity",
-            value: loading
-              ? "Loading…"
-              : stats.lastActivityAt?.formatted(date: .abbreviated, time: .shortened)
-                ?? "No activity yet"
-          ) {
-            activityDestination = .lastActivity
-          }
-        }
-      }
-      .background {
-        OverviewSurfaceCard(cornerRadius: 8)
+      UsageActivityCard(product: profile.product, stats: stats, loading: loading) {
+        activityDestination = $0
       }
 
       if profile.product == .claude {
@@ -329,7 +262,8 @@ private struct OfficialOverview: View {
 
         if product == .codex {
           UsageLimitsCard(limits: model.officialCodexRateLimits, accent: AgentDockPalette.blue)
-          OfficialActivityCard(
+          UsageActivityCard(
+            product: product,
             stats: model.officialCodexStats,
             loading: model.officialStatsLoading
           ) { destination in
@@ -341,11 +275,15 @@ private struct OfficialOverview: View {
             loading: model.officialStatsLoading,
             accent: .orange
           )
-          OfficialActivityCard(
+          UsageActivityCard(
+            product: product,
             stats: model.officialClaudeStats,
             loading: model.officialStatsLoading
           ) { destination in
             activityDestination = destination
+          }
+          if model.profiles.contains(where: { $0.product == .claude }) {
+            ClaudeUsageSourcesCard(selection: .official)
           }
           VStack(alignment: .leading, spacing: 6) {
             Label("Claude Desktop local boundary", systemImage: "lock.shield")
@@ -489,14 +427,54 @@ private struct ClaudeUsageCard: View {
   }
 }
 
-private struct ClaudeProfilesCard: View {
+private enum ClaudeUsageSelection: Equatable {
+  case official
+  case profile(CodexProfile.ID)
+}
+
+private struct ClaudeUsageSourcesCard: View {
   @EnvironmentObject private var model: CodexerModel
-  let selectedProfile: CodexProfile
+  let selection: ClaudeUsageSelection
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      SectionLabel(title: "Claude Profiles")
+      SectionLabel(title: "Claude Usage Sources")
       VStack(spacing: 0) {
+        Button {
+          model.selectOfficial(.claude)
+        } label: {
+          HStack(spacing: 10) {
+            ProviderIconView(
+              product: .claude,
+              appURL: model.appURL(for: .claude),
+              size: 30
+            )
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Official Claude")
+                .font(.system(size: 13, weight: selection == .official ? .semibold : .regular))
+              Text(officialSummary)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            StatusDot(
+              isRunning: model.stockInstanceStatuses[.claude]?.isRunning == true,
+              size: 7
+            )
+            Text(model.stockInstanceStatuses[.claude]?.isRunning == true ? "Running" : "Stopped")
+              .font(.system(size: 11))
+              .foregroundStyle(.secondary)
+          }
+          .padding(.horizontal, 12)
+          .frame(height: 50)
+          .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+
+        if !profiles.isEmpty {
+          Divider().overlay(AgentDockPalette.divider)
+        }
+
         ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
           Button {
             model.selectProfile(profile.id)
@@ -505,7 +483,10 @@ private struct ClaudeProfilesCard: View {
               ProfileIconView(profile: profile, size: 30)
               VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name)
-                  .font(.system(size: 13, weight: profile.id == selectedProfile.id ? .semibold : .regular))
+                  .font(.system(
+                    size: 13,
+                    weight: selection == .profile(profile.id) ? .semibold : .regular
+                  ))
                 Text(summary(for: profile))
                   .font(.system(size: 11))
                   .foregroundStyle(.secondary)
@@ -537,6 +518,12 @@ private struct ClaudeProfilesCard: View {
   private func summary(for profile: CodexProfile) -> String {
     let stats = model.stats(for: profile)
     if model.statsAreLoading(for: profile) { return "Loading local usage…" }
+    return "\(stats.weeklySessions) sessions · \(stats.weeklyTokens.formatted()) tokens in 7 days"
+  }
+
+  private var officialSummary: String {
+    if model.officialStatsLoading { return "Loading local usage…" }
+    let stats = model.officialClaudeStats
     return "\(stats.weeklySessions) sessions · \(stats.weeklyTokens.formatted()) tokens in 7 days"
   }
 }
@@ -646,7 +633,8 @@ private struct LimitRow: View {
   }
 }
 
-private struct OfficialActivityCard: View {
+private struct UsageActivityCard: View {
+  let product: DesktopProduct
   let stats: ProfileStats
   let loading: Bool
   let onSelect: (ActivityDestination) -> Void
@@ -656,14 +644,6 @@ private struct OfficialActivityCard: View {
       SectionLabel(title: "Activity")
       VStack(spacing: 0) {
         ActivityRow(
-          icon: "bubble.left.and.bubble.right",
-          title: "Sessions",
-          value: loading ? "Loading…" : "\(stats.totalSessions)"
-        ) {
-          onSelect(.sessions)
-        }
-        Divider().overlay(AgentDockPalette.divider)
-        ActivityRow(
           icon: "externaldrive", title: "Storage",
           value: loading
             ? "Loading…"
@@ -671,17 +651,56 @@ private struct OfficialActivityCard: View {
         ) {
           onSelect(.storage)
         }
-        Divider().overlay(AgentDockPalette.divider)
-        ActivityRow(
-          icon: "waveform.path.ecg", title: "Latest local activity",
-          value: loading
-            ? "Loading…"
-            : stats.lastActivityAt?.formatted(date: .abbreviated, time: .shortened)
-              ?? "No activity yet"
-        ) {
-          onSelect(.lastActivity)
+        if product == .codex {
+          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
+          ActivityRow(
+            icon: "doc.text",
+            title: "Logs, last 7 days",
+            value: loading
+              ? "Loading…"
+              : "\(stats.weeklyErrors) errors · \(stats.weeklyWarnings) warnings",
+            valueColor: stats.weeklyErrors > 0
+              ? .red : (stats.weeklyWarnings > 0 ? .orange : .secondary)
+          ) {
+            onSelect(.logs)
+          }
+          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
+          latestActivityRow
+          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
+          ActivityRow(
+            icon: "archivebox",
+            title: "Archived",
+            value: loading ? "Loading…" : stats.archivedSessions.formatted()
+          ) {
+            onSelect(.archived)
+          }
+        } else {
+          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
+          ActivityRow(
+            icon: "text.bubble",
+            title: "Local sessions",
+            value: loading ? "Loading…" : stats.totalSessions.formatted()
+          ) {
+            onSelect(.sessions)
+          }
+          Divider().overlay(AgentDockPalette.divider).frame(height: 0)
+          latestActivityRow
         }
       }
+      .background { OverviewSurfaceCard(cornerRadius: 8) }
+    }
+  }
+
+  private var latestActivityRow: some View {
+    ActivityRow(
+      icon: "waveform.path.ecg",
+      title: "Latest local activity",
+      value: loading
+        ? "Loading…"
+        : stats.lastActivityAt?.formatted(date: .abbreviated, time: .shortened)
+          ?? "No activity yet"
+    ) {
+      onSelect(.lastActivity)
     }
   }
 }
