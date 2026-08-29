@@ -160,10 +160,12 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$SPARKLE_PUBLIC_KEY</string>
   <key>SUEnableAutomaticChecks</key>
   <true/>
+  <key>SUScheduledCheckInterval</key>
+  <real>3600</real>
   <key>SUAllowsAutomaticUpdates</key>
   <true/>
   <key>SUAutomaticallyUpdate</key>
-  <true/>
+  <false/>
   <key>SURequireSignedFeed</key>
   <true/>
   <key>SUVerifyUpdateBeforeExtraction</key>

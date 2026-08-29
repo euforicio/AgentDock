@@ -90,6 +90,8 @@ PLIST_ICON="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO_PLIST"
 PLIST_MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO_PLIST")"
 PLIST_FEED_URL="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO_PLIST")"
 PLIST_PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO_PLIST")"
+PLIST_UPDATE_CHECK_INTERVAL="$(/usr/libexec/PlistBuddy -c 'Print :SUScheduledCheckInterval' "$INFO_PLIST")"
+PLIST_AUTOMATICALLY_UPDATE="$(/usr/libexec/PlistBuddy -c 'Print :SUAutomaticallyUpdate' "$INFO_PLIST")"
 PLIST_REQUIRE_SIGNED_FEED="$(/usr/libexec/PlistBuddy -c 'Print :SURequireSignedFeed' "$INFO_PLIST")"
 PLIST_VERIFY_BEFORE_EXTRACTION="$(/usr/libexec/PlistBuddy -c 'Print :SUVerifyUpdateBeforeExtraction' "$INFO_PLIST")"
 PLIST_POSTHOG_TOKEN="$(/usr/libexec/PlistBuddy -c 'Print :AgentDockPostHogProjectToken' "$INFO_PLIST")"
@@ -100,6 +102,10 @@ PLIST_POSTHOG_HOST="$(/usr/libexec/PlistBuddy -c 'Print :AgentDockPostHogHost' "
 [[ "$PLIST_MIN_OS" == "26.0" ]] || fail "unexpected minimum macOS version: $PLIST_MIN_OS"
 [[ "$PLIST_FEED_URL" == "https://euforicio.github.io/AgentDock/appcast.xml" ]] \
   || fail "unexpected Sparkle feed URL: $PLIST_FEED_URL"
+[[ "$PLIST_UPDATE_CHECK_INTERVAL" =~ ^3600([.]0+)?$ ]] \
+  || fail "Sparkle update checks must run hourly"
+[[ "$PLIST_AUTOMATICALLY_UPDATE" == "false" ]] \
+  || fail "Sparkle updates must wait for the update pill by default"
 [[ "$PLIST_REQUIRE_SIGNED_FEED" == "true" ]] || fail "signed Sparkle feeds must be required"
 [[ "$PLIST_VERIFY_BEFORE_EXTRACTION" == "true" ]] \
   || fail "Sparkle updates must be verified before extraction"
