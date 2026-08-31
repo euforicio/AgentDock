@@ -41,10 +41,9 @@ automatic activity timer cannot.
 
 Codex usage refresh is provider-aware. The built-in OpenAI provider uses the
 bundled Codex app-server, while a selected custom provider uses its configured
-OpenAI-compatible `/organization/usage/completions` endpoint. Provider
-configuration parsing, safe URL construction, request authentication, bounded
-response reading, and activity aggregation remain in `CodexerCore`; the UI
-consumes only `ProfileRateLimits`.
+`/usage` quota endpoint. Provider configuration parsing, safe URL construction,
+request authentication, bounded response reading, and meter translation remain
+in `CodexerCore`; the UI consumes only `ProfileRateLimits`.
 
 ### Core
 

@@ -59,7 +59,10 @@ public struct IsolatedCodexLaunchConfiguration: Codable, Equatable, Sendable {
         let infoPlistURL = codexAppURL.appendingPathComponent("Contents/Info.plist")
         let executableName: String? = {
             guard
-                let data = try? Data(contentsOf: infoPlistURL),
+                let data = try? BoundedFileReader.data(
+                    at: infoPlistURL,
+                    maximumBytes: LocalControlFileLimit.propertyList
+                ),
                 let plist = try? PropertyListSerialization.propertyList(
                     from: data,
                     format: nil
@@ -119,7 +122,10 @@ public struct OfficialCodexAppValidator: CodexAppValidating, @unchecked Sendable
 
         let infoPlist = url.appendingPathComponent("Contents/Info.plist")
         guard
-            let data = try? Data(contentsOf: infoPlist),
+            let data = try? BoundedFileReader.data(
+                at: infoPlist,
+                maximumBytes: LocalControlFileLimit.propertyList
+            ),
             let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             plist["CFBundleIdentifier"] as? String == Self.bundleIdentifier
         else {
@@ -1237,7 +1243,10 @@ public actor CodexInstanceController {
         let markerURL = profileDirectory.appendingPathComponent(".codexer-profile.json")
         guard let expectedID = configuration.profileID,
               let expectedSlug = configuration.profileSlug,
-              let markerData = try? Data(contentsOf: markerURL),
+              let markerData = try? BoundedFileReader.data(
+                  at: markerURL,
+                  maximumBytes: LocalControlFileLimit.ownershipMarker
+              ),
               let marker = try? JSONDecoder().decode(OwnershipMarker.self, from: markerData),
               marker.profileID == expectedID,
               marker.product == nil || marker.product == .codex,

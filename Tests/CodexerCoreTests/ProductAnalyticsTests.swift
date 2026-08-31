@@ -19,31 +19,43 @@ final class ProductAnalyticsTests: XCTestCase {
         super.tearDown()
     }
 
-    func testAnalyticsDefaultsToGrantedAndCreatesIdentifier() {
+    func testAnalyticsRequiresExplicitConsentAndCreatesNoIdentifier() {
         let store = AnalyticsConsentStore(defaults: defaults)
         XCTAssertEqual(store.consent, .undecided)
         XCTAssertNil(store.installationID)
 
         _ = ProductAnalytics(consentStore: store, configuration: nil)
 
-        XCTAssertEqual(store.consent, .granted)
-        XCTAssertNotNil(store.installationID)
-        XCTAssertEqual(defaults.string(forKey: "AgentDock.analyticsConsent.v1"), "granted")
-        XCTAssertNotNil(defaults.string(forKey: "AgentDock.analyticsInstallationID.v1"))
+        XCTAssertEqual(store.consent, .undecided)
+        XCTAssertNil(store.installationID)
+        XCTAssertEqual(defaults.string(forKey: "AgentDock.analyticsConsent.v2"), "undecided")
+        XCTAssertNil(defaults.string(forKey: "AgentDock.analyticsInstallationID.v2"))
+        XCTAssertEqual(defaults.string(forKey: "AgentDock.analyticsConsent.v1"), "denied")
     }
 
-    func testExplicitOptOutSurvivesDefaultEnablement() {
-        let store = AnalyticsConsentStore(defaults: defaults)
-        store.denyAndDeleteIdentifier()
+    func testLegacyDefaultGrantMigratesToUndecidedAndDeletesIdentifier() {
+        defaults.set("granted", forKey: "AgentDock.analyticsConsent.v1")
+        defaults.set(UUID().uuidString, forKey: "AgentDock.analyticsInstallationID.v1")
 
-        _ = ProductAnalytics(consentStore: store, configuration: nil)
+        let store = AnalyticsConsentStore(defaults: defaults)
+
+        XCTAssertEqual(store.consent, .undecided)
+        XCTAssertNil(store.installationID)
+        XCTAssertEqual(defaults.string(forKey: "AgentDock.analyticsConsent.v1"), "denied")
+        XCTAssertNil(defaults.string(forKey: "AgentDock.analyticsInstallationID.v1"))
+    }
+
+    func testLegacyExplicitOptOutSurvivesMigration() {
+        defaults.set("denied", forKey: "AgentDock.analyticsConsent.v1")
+
+        let store = AnalyticsConsentStore(defaults: defaults)
 
         XCTAssertEqual(store.consent, .denied)
         XCTAssertNil(store.installationID)
     }
 
     func testInvalidPersistedConsentFailsClosed() {
-        defaults.set("unexpected", forKey: "AgentDock.analyticsConsent.v1")
+        defaults.set("unexpected", forKey: "AgentDock.analyticsConsent.v2")
         let store = AnalyticsConsentStore(defaults: defaults)
 
         _ = ProductAnalytics(consentStore: store, configuration: nil)
@@ -65,6 +77,7 @@ final class ProductAnalyticsTests: XCTestCase {
 
         let replacement = store.grant()
         XCTAssertNotEqual(replacement, first)
+        XCTAssertEqual(defaults.string(forKey: "AgentDock.analyticsConsent.v1"), "denied")
     }
 
     func testResetReturnsToUndecidedAndDeletesIdentifier() {

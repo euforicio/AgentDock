@@ -4,6 +4,7 @@
 
 # AgentDock
 
+[![Quality](https://github.com/euforicio/AgentDock/actions/workflows/ci.yml/badge.svg)](https://github.com/euforicio/AgentDock/actions/workflows/ci.yml)
 [![Build and Release](https://github.com/euforicio/AgentDock/actions/workflows/release.yml/badge.svg)](https://github.com/euforicio/AgentDock/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/euforicio/AgentDock?display_name=tag)](https://github.com/euforicio/AgentDock/releases/latest)
 [![License: FSL-1.1-MIT](https://img.shields.io/badge/license-FSL--1.1--MIT-6f5cff)](LICENSE)
@@ -88,8 +89,8 @@ permanent deletion is a separate confirmed action.
 ## Local Data and Privacy
 
 AgentDock is local-first. It does not provide cloud synchronization or upload
-managed profile data. Pseudonymous product analytics are enabled by default
-and can be disabled immediately in Settings. They never
+managed profile data. Optional pseudonymous product analytics remain off until
+you explicitly allow them and can be disabled immediately in Settings. They never
 include profile, account, path, command, prompt, chat, transcript, session,
 configuration, log, or crash content. AgentDock stores profile metadata and indexes under
 `~/Library/Application Support/AgentDock/` and creates shortcuts under
@@ -100,10 +101,9 @@ Local transcript support is source-dependent:
 - Codex uses supported local databases and session JSONL fallbacks.
   Native OpenAI profiles read account limits through the bundled Codex
   app-server. When a profile selects a custom `model_provider`, AgentDock tries
-  that provider's configured OpenAI-compatible
-  `GET /organization/usage/completions` endpoint instead and shows its rolling
-  seven-day token and request totals. A custom provider is never shown with an
-  unrelated OpenAI quota.
+  that provider's configured `GET /usage` quota endpoint instead and shows its
+  percentage-based allowance windows and reset times. A custom provider is
+  never shown with an unrelated OpenAI quota.
 - Claude uses supported local Cowork/agent-session data. The Official Claude
   view can also include the lightweight Claude Code history index and matching
   local session files. Official and managed Claude sources expose the same

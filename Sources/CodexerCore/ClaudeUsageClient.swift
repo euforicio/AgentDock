@@ -52,6 +52,9 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 15
+        configuration.waitsForConnectivity = false
         session = URLSession(configuration: configuration)
     }
 
@@ -265,9 +268,23 @@ public actor ClaudeUsageClient: ClaudeUsageFetching {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("claude-code/2.1.69", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await session.data(for: request)
+        let maximumResponseBytes = 1 * 1_024 * 1_024
+        let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw ClaudeUsageClientError.invalidResponse
+        }
+        guard response.expectedContentLength <= maximumResponseBytes else {
+            throw ClaudeUsageClientError.responseTooLarge
+        }
+        var data = Data()
+        if response.expectedContentLength > 0 {
+            data.reserveCapacity(Int(response.expectedContentLength))
+        }
+        for try await byte in bytes {
+            guard data.count < maximumResponseBytes else {
+                throw ClaudeUsageClientError.responseTooLarge
+            }
+            data.append(byte)
         }
         return (data, response)
     }
@@ -455,13 +472,19 @@ private struct ClaudeCredentialReader {
             return credential
         }
         let file = homeURL.appendingPathComponent(".credentials.json")
-        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        guard let text = try? BoundedFileReader.string(
+            at: file,
+            maximumBytes: LocalControlFileLimit.providerCredentialState
+        ) else { return nil }
         return parseCredential(text, identity: identity)
     }
 
     func readDesktopCredential(userDataURL: URL) -> ClaudeUsageCredential? {
         let configURL = userDataURL.appendingPathComponent("config.json")
-        guard let data = try? Data(contentsOf: configURL),
+        guard let data = try? BoundedFileReader.data(
+                  at: configURL,
+                  maximumBytes: LocalControlFileLimit.providerCredentialState
+              ),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let password = readKeychainPassword(
                   service: Self.safeStorageService,
@@ -517,7 +540,10 @@ private struct ClaudeCredentialReader {
 
     private func codeIdentity(homeURL: URL) -> ClaudeAccountIdentity? {
         let stateURL = homeURL.deletingLastPathComponent().appendingPathComponent(".claude.json")
-        guard let data = try? Data(contentsOf: stateURL),
+        guard let data = try? BoundedFileReader.data(
+                  at: stateURL,
+                  maximumBytes: LocalControlFileLimit.providerCredentialState
+              ),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let account = root["oauthAccount"] as? [String: Any],
               let accountUUID = nonempty(account["accountUuid"] as? String),
@@ -745,6 +771,7 @@ private struct ClaudeAccountProfile: Decodable {
 
 private enum ClaudeUsageClientError: Error {
     case invalidResponse
+    case responseTooLarge
     case invalidCredential
     case identityMismatch
     case rateLimited(TimeInterval?)

@@ -2,9 +2,9 @@ import CodexerCore
 import SwiftUI
 
 struct AnalyticsConsentView: View {
-    // Retain the consent flow so an explicit prompt can be restored without
-    // rebuilding it. Product analytics currently use an opt-out default.
-    static let presentationEnabled = false
+    static func shouldPresent(consent: AnalyticsConsent, isConfigured: Bool) -> Bool {
+        isConfigured && consent == .undecided
+    }
 
     @EnvironmentObject private var model: CodexerModel
 

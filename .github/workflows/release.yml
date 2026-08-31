@@ -9,13 +9,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: agentdock-stable-release
   cancel-in-progress: false
 
 jobs:
   build:
     name: Build signed and notarized macOS app
     runs-on: blacksmith-6vcpu-macos-latest
+    environment: release
     env:
       AGENTDOCK_BUILD_SCRATCH_DIR: /tmp/agentdock-release-build
       AGENTDOCK_SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
@@ -25,6 +26,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Validate release version
         run: |
@@ -37,10 +40,51 @@ jobs:
             echo "The release environment variable SPARKLE_PUBLIC_ED_KEY is required." >&2
             exit 1
           fi
+
+          git fetch --force --tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tags must point to a commit contained in origin/main." >&2
+            exit 1
+          fi
+          highest_tag="$(
+            git tag --list 'v*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -n 1
+          )"
+          if [[ "$highest_tag" != "$GITHUB_REF_NAME" ]]; then
+            echo "Release tag $GITHUB_REF_NAME is not the highest version tag ($highest_tag)." >&2
+            exit 1
+          fi
+
+          version_greater_than() {
+            local candidate="$1"
+            local previous="$2"
+            local candidate_major candidate_minor candidate_patch
+            local previous_major previous_minor previous_patch
+            IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$candidate"
+            IFS=. read -r previous_major previous_minor previous_patch <<<"$previous"
+            (( 10#$candidate_major > 10#$previous_major )) && return 0
+            (( 10#$candidate_major < 10#$previous_major )) && return 1
+            (( 10#$candidate_minor > 10#$previous_minor )) && return 0
+            (( 10#$candidate_minor < 10#$previous_minor )) && return 1
+            (( 10#$candidate_patch > 10#$previous_patch ))
+          }
+          public_appcast="$RUNNER_TEMP/current-appcast.xml"
+          curl -fsSL --retry 3 \
+            "https://euforicio.github.io/AgentDock/appcast.xml?release-check=$GITHUB_RUN_ID" \
+            -o "$public_appcast"
+          public_version="$(./script/latest_appcast_version.sh "$public_appcast")"
+          if ! version_greater_than "$version" "$public_version"; then
+            echo "Release version $version must be newer than public appcast version $public_version." >&2
+            exit 1
+          fi
           echo "AGENTDOCK_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Run full tests
         run: swift test
+
+      - name: Run vendored renderer tests
+        run: swift test --package-path Vendor/streamdown-swift
 
       - name: Prepare Developer ID signing and notarization
         env:
@@ -263,10 +307,11 @@ jobs:
           archive_dir="$RUNNER_TEMP/agentdock-appcast"
           asset_url="https://github.com/euforicio/AgentDock/releases/download/$GITHUB_REF_NAME/$archive_name"
           mkdir -p "$archive_dir"
-          cp "release-input/$archive_name" "$archive_dir/$archive_name"
           available=0
           for _ in 1 2 3 4 5 6; do
-            if curl -fsSIL "$asset_url" >/dev/null; then
+            if curl -fsSL \
+              "$asset_url?release-run=$GITHUB_RUN_ID" \
+              -o "$archive_dir/$archive_name"; then
               available=1
               break
             fi
@@ -274,6 +319,10 @@ jobs:
           done
           if [[ "$available" != "1" ]]; then
             echo "Published release asset is not available at $asset_url." >&2
+            exit 1
+          fi
+          if ! cmp -s "release-input/$archive_name" "$archive_dir/$archive_name"; then
+            echo "Published release ZIP does not match the notarized workflow artifact." >&2
             exit 1
           fi
           curl -fsSL "https://euforicio.github.io/AgentDock/appcast.xml" \
@@ -325,3 +374,25 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Publish AgentDock $GITHUB_REF_NAME appcast"
           git push origin HEAD:gh-pages
+
+      - name: Verify public appcast bytes and signature
+        run: |
+          sign_update=".build/artifacts/sparkle/Sparkle/bin/sign_update"
+          public_appcast="$RUNNER_TEMP/public-appcast.xml"
+          published=0
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if curl -fsSL \
+              "https://euforicio.github.io/AgentDock/appcast.xml?release-run=$GITHUB_RUN_ID&attempt=$attempt" \
+              -o "$public_appcast" \
+              && cmp -s "$RUNNER_TEMP/AgentDock-appcast.xml" "$public_appcast"; then
+              published=1
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$published" != "1" ]]; then
+            echo "The public appcast did not converge to the generated signed bytes." >&2
+            exit 1
+          fi
+          printf '%s' "$SPARKLE_PRIVATE_ED_KEY" \
+            | "$sign_update" --verify --ed-key-file - "$public_appcast" >/dev/null

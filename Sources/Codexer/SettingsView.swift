@@ -240,7 +240,7 @@ struct SettingsView: View {
                 Toggle("", isOn: analyticsBinding).labelsHidden()
             }
             Text(
-                "Enabled by default. AgentDock sends only allowlisted feature actions, outcomes, safe error codes, normalized plan tiers, coarse profile, usage, count, and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, exact usage or balances, model names, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
+                "Off until you explicitly allow it. AgentDock then sends only allowlisted feature actions, outcomes, safe error codes, normalized plan tiers, coarse profile, usage, count, and timing buckets, app version, macOS major version, and architecture. It never sends names, account identities, exact usage or balances, model names, paths, commands, prompts, chats, transcripts, session IDs, configuration values, environment variables, logs, crashes, or precise location. No autocapture or session replay is used. Turning this off immediately clears pending events and deletes the local random analytics identifier."
             )
             .font(.system(size: 12))
             .foregroundStyle(.secondary)

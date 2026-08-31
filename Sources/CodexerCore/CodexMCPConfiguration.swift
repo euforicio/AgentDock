@@ -14,7 +14,12 @@ public enum CodexMCPConfiguration {
         try validatePort(callbackPort)
         let configURL = codexHomeURL.appendingPathComponent("config.toml")
         let existed = fileManager.fileExists(atPath: configURL.path)
-        let originalData = existed ? try Data(contentsOf: configURL) : nil
+        let originalData = existed
+            ? try BoundedFileReader.data(
+                at: configURL,
+                maximumBytes: LocalControlFileLimit.providerConfiguration
+            )
+            : nil
         let existing = try readConfig(at: configURL, fileManager: fileManager) ?? ""
         let existingPermissions = existed
             ? (try fileManager.attributesOfItem(atPath: configURL.path)[.posixPermissions] as? NSNumber)?.uint16Value
@@ -434,13 +439,15 @@ public enum CodexMCPConfiguration {
         fileManager: FileManager
     ) throws -> String? {
         guard fileManager.fileExists(atPath: configURL.path) else { return nil }
-        let values = try configURL.resourceValues(
-            forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-        )
-        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+        let data: Data
+        do {
+            data = try BoundedFileReader.data(
+                at: configURL,
+                maximumBytes: LocalControlFileLimit.providerConfiguration
+            )
+        } catch {
             throw CodexMCPConfigurationError.unsafeConfig(configURL.path)
         }
-        let data = try Data(contentsOf: configURL)
         guard let content = String(data: data, encoding: .utf8) else {
             throw CodexMCPConfigurationError.invalidEncoding(configURL.path)
         }

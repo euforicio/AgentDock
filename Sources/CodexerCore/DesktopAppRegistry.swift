@@ -57,7 +57,10 @@ public struct OfficialDesktopAppValidator: @unchecked Sendable {
         }
 
         let infoPlistURL = url.appendingPathComponent("Contents/Info.plist")
-        guard let data = try? Data(contentsOf: infoPlistURL),
+        guard let data = try? BoundedFileReader.data(
+                  at: infoPlistURL,
+                  maximumBytes: LocalControlFileLimit.propertyList
+              ),
               let plist = try? PropertyListSerialization.propertyList(
                   from: data,
                   format: nil

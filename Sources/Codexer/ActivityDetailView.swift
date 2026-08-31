@@ -117,7 +117,10 @@ struct ActivityDetailSheet: View {
       VStack(alignment: .leading, spacing: 14) {
         ActivitySummaryRow(
           label: "Total local data",
-          value: ByteCountFormatter.agentDock.string(fromByteCount: stats.dataBytes)
+          value: {
+            let formatted = ByteCountFormatter.agentDock.string(fromByteCount: stats.dataBytes)
+            return stats.dataSizeIsTruncated ? "At least \(formatted)" : formatted
+          }()
         )
 
         SectionLabel(title: "Locations")

@@ -1,9 +1,12 @@
 # Privacy-First Product Analytics
 
-AgentDock product analytics are enabled by default and can be disabled
-immediately in **Settings → Data & Privacy** without changing any product
-feature. An explicit opt-out is preserved across upgrades. The consent sheet is
-retained in source but its presentation flag is currently disabled.
+AgentDock product analytics remain off until the user explicitly allows them.
+The consent sheet appears only when delivery is configured and the installation
+is undecided. Analytics can be disabled immediately in **Settings → Data &
+Privacy** without changing any product feature. Explicit choices persist across
+upgrades. Installations migrated from the former opt-out policy are returned to
+undecided, their old random identifier is deleted, and older app versions remain
+fail-closed.
 
 AgentDock uses a small first-party HTTPS client rather than the PostHog Swift
 SDK. The official SDK supports macOS, but currently defaults several collection
@@ -24,13 +27,14 @@ larger, less auditable boundary than AgentDock needs.
 
 ## Collection and Delivery Contract
 
-- A random UUID is created when analytics first initializes and is not derived from a device,
+- A random UUID is created only after consent is granted and is not derived from a device,
   account, profile, provider, filesystem, or hardware identifier.
 - The UUID stays stable while analytics is enabled. Opt-out synchronously clears
   pending events and deletes it; later re-enabling creates an unlinkable UUID.
 - Events stay in memory for at most five seconds or twelve events. The queue is
   capped at 48 events, never written to disk, and discarded on delivery failure
-  or app exit. Requests are capped at 64 KiB. Successful and failed batch counts
+  or app exit. Only one delivery batch is active at a time, and requests are
+  capped at 64 KiB. Successful and failed batch counts
   plus the last bounded failure class are retained in memory; failures also emit
   a local OS log entry containing only that class.
 - Every request sets `$geoip_disable: true` and

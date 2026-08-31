@@ -26,6 +26,67 @@ final class ReleaseWorkflowTests: XCTestCase {
         XCTAssertTrue(workflow.contains("  appcast:\n    name: Sign and publish stable appcast last\n    needs: release\n"))
         XCTAssertTrue(workflow.contains("https://github.com/euforicio/AgentDock/releases/download/$GITHUB_REF_NAME/"))
         XCTAssertTrue(workflow.contains("https://euforicio.github.io/AgentDock/appcast.xml"))
+        XCTAssertTrue(workflow.contains("cmp -s \"release-input/$archive_name\" \"$archive_dir/$archive_name\""))
+        XCTAssertTrue(workflow.contains("Verify public appcast bytes and signature"))
+    }
+
+    func testReleaseIsSerializedMainBoundAndEnvironmentProtected() throws {
+        let workflow = try String(contentsOf: repositoryRoot
+            .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
+
+        XCTAssertTrue(workflow.contains("group: agentdock-stable-release"))
+        XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$GITHUB_SHA\" origin/main"))
+        XCTAssertTrue(workflow.contains("is not the highest version tag"))
+        XCTAssertTrue(workflow.contains("public_version=\"$(./script/latest_appcast_version.sh \"$public_appcast\")\""))
+        XCTAssertTrue(workflow.contains("Release version $version must be newer than public appcast version"))
+        XCTAssertTrue(workflow.contains("runs-on: blacksmith-6vcpu-macos-latest\n    environment: release"))
+    }
+
+    func testAppcastVersionExtractorHandlesSparkleElementAndFailsClosed() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let validAppcast = temporaryDirectory.appendingPathComponent("valid.xml")
+        try """
+        <?xml version="1.0" encoding="utf-8"?>
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+          <channel>
+            <item>
+              <sparkle:shortVersionString>0.1.19</sparkle:shortVersionString>
+            </item>
+          </channel>
+        </rss>
+        """.write(to: validAppcast, atomically: true, encoding: .utf8)
+
+        let validResult = try runAppcastVersionExtractor(with: validAppcast)
+        XCTAssertEqual(validResult.status, 0)
+        XCTAssertEqual(validResult.standardOutput, "0.1.19\n")
+
+        let invalidAppcast = temporaryDirectory.appendingPathComponent("invalid.xml")
+        try "<rss><channel><item /></channel></rss>"
+            .write(to: invalidAppcast, atomically: true, encoding: .utf8)
+
+        let invalidResult = try runAppcastVersionExtractor(with: invalidAppcast)
+        XCTAssertNotEqual(invalidResult.status, 0)
+        XCTAssertTrue(invalidResult.standardError.contains("does not contain a valid semantic short version"))
+    }
+
+    func testContinuousIntegrationCoversRootVendorPrivacyAndPackaging() throws {
+        let workflow = try String(contentsOf: repositoryRoot
+            .appendingPathComponent(".github/workflows/ci.yml"), encoding: .utf8)
+
+        XCTAssertTrue(workflow.contains("pull_request:"))
+        XCTAssertTrue(workflow.contains("branches:\n      - main"))
+        XCTAssertTrue(workflow.contains("run: swift test\n"))
+        XCTAssertTrue(workflow.contains("swift test --package-path Vendor/streamdown-swift"))
+        XCTAssertTrue(workflow.contains("./script/audit_privacy.sh"))
+        XCTAssertTrue(workflow.contains("./script/build_app.sh"))
+        XCTAssertTrue(workflow.contains("./script/package_app.sh"))
     }
 
     func testReleasePublicationUsesBlacksmithRunnerWithWritePermission() throws {
@@ -84,5 +145,35 @@ final class ReleaseWorkflowTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+    }
+
+    private func runAppcastVersionExtractor(with appcast: URL) throws -> (
+        status: Int32,
+        standardOutput: String,
+        standardError: String
+    ) {
+        let process = Process()
+        process.executableURL = repositoryRoot
+            .appendingPathComponent("script/latest_appcast_version.sh")
+        process.arguments = [appcast.path]
+
+        let standardOutput = Pipe()
+        let standardError = Pipe()
+        process.standardOutput = standardOutput
+        process.standardError = standardError
+        try process.run()
+        process.waitUntilExit()
+
+        return (
+            process.terminationStatus,
+            String(
+                decoding: standardOutput.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            ),
+            String(
+                decoding: standardError.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            )
+        )
     }
 }

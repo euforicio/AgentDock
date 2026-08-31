@@ -71,12 +71,12 @@ through AgentDock's parent environment.
 
 ## Product Analytics
 
-Analytics are a separate default-on, immediately revocable boundary implemented in
+Analytics are a separate explicit-opt-in, immediately revocable boundary implemented in
 [`ProductAnalytics.swift`](../Sources/CodexerCore/ProductAnalytics.swift).
 Only closed typed events can be batched to the configured regional PostHog
 endpoint. Events never carry source content or local identifiers; GeoIP and
 person-profile processing are disabled, and queues exist only in bounded
-memory. Explicit opt-outs persist across upgrades and clear the queue and
+memory. Explicit choices persist across upgrades; opt-out clears the queue and
 random identifier. The public project
 token is release configuration, not a credential; no private PostHog key
 belongs in the app. See the [complete catalog](analytics.md).

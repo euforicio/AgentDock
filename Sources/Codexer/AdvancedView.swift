@@ -135,9 +135,11 @@ private struct ProfileAdvancedView: View {
         ManagedPathRow(
           title: "Profile Data",
           url: profile.profileDirectory,
-          value: ByteCountFormatter.agentDock.string(
-            fromByteCount: model.stats(for: profile).dataBytes
-          )
+          value: {
+            let stats = model.stats(for: profile)
+            let formatted = ByteCountFormatter.agentDock.string(fromByteCount: stats.dataBytes)
+            return stats.dataSizeIsTruncated ? "At least \(formatted)" : formatted
+          }()
         )
 
         if profile.product == .codex {
@@ -250,7 +252,7 @@ private struct ProfileAdvancedView: View {
         ManagementButton(
           icon: "trash.fill",
           title: "Delete Profile Data…",
-          subtitle: "Permanently deletes this profile's local sessions, credentials, and settings.",
+          subtitle: "Permanently deletes managed sessions and settings; shared Keychain items remain.",
           destructive: true
         ) {
           model.pendingDeleteProfile = profile

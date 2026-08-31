@@ -293,7 +293,10 @@ public final class ProfileStore: @unchecked Sendable {
 
         let previous = storedProfiles
         let markerURL = ownershipMarkerURL(for: profile)
-        let priorMarker = try? Data(contentsOf: markerURL)
+        let priorMarker = try? BoundedFileReader.data(
+            at: markerURL,
+            maximumBytes: LocalControlFileLimit.ownershipMarker
+        )
         let journal = RestoreJournal(
             profileID: profile.id,
             profileDirectory: profile.profileDirectory,
@@ -391,10 +394,18 @@ public final class ProfileStore: @unchecked Sendable {
 
         let previous = storedProfiles
         let markerURL = ownershipMarkerURL(for: profile)
-        let priorMarker = try? Data(contentsOf: markerURL)
+        let priorMarker = try? BoundedFileReader.data(
+            at: markerURL,
+            maximumBytes: LocalControlFileLimit.ownershipMarker
+        )
         let configURL = profile.codexHomePath.appendingPathComponent("config.toml")
         let priorConfigExisted = fileManager.fileExists(atPath: configURL.path)
-        let priorConfig = priorConfigExisted ? try Data(contentsOf: configURL) : nil
+        let priorConfig = priorConfigExisted
+            ? try BoundedFileReader.data(
+                at: configURL,
+                maximumBytes: LocalControlFileLimit.providerConfiguration
+            )
+            : nil
         let priorConfigPermissions = priorConfigExisted
             ? (try fileManager.attributesOfItem(atPath: configURL.path)[.posixPermissions] as? NSNumber)?.uint16Value
             : nil
@@ -487,7 +498,10 @@ public final class ProfileStore: @unchecked Sendable {
         }
 
         let iconURL = storedProfiles[index].customIconPath
-        let priorIconData = try? Data(contentsOf: iconURL)
+        let priorIconData = try? BoundedFileReader.data(
+            at: iconURL,
+            maximumBytes: LocalControlFileLimit.customIcon
+        )
         do {
             if let customIconData {
                 guard
@@ -648,7 +662,10 @@ public final class ProfileStore: @unchecked Sendable {
 
     private func loadProfilesUnlocked() throws {
         if fileManager.fileExists(atPath: profilesFile.path) {
-            let data = try Data(contentsOf: profilesFile)
+            let data = try BoundedFileReader.data(
+                at: profilesFile,
+                maximumBytes: LocalControlFileLimit.profiles
+            )
             storedProfiles = try JSONDecoder.codexer.decode([CodexProfile].self, from: data)
         } else {
             storedProfiles = []
@@ -1041,7 +1058,10 @@ public final class ProfileStore: @unchecked Sendable {
         guard fileManager.fileExists(atPath: markerURL.path) else {
             return UUID()
         }
-        guard let data = try? Data(contentsOf: markerURL),
+        guard let data = try? BoundedFileReader.data(
+                  at: markerURL,
+                  maximumBytes: LocalControlFileLimit.ownershipMarker
+              ),
               let marker = try? JSONDecoder().decode(OwnershipMarker.self, from: data),
               marker.product == product || (marker.product == nil && product == .codex),
               marker.slug == slug
@@ -1072,7 +1092,10 @@ public final class ProfileStore: @unchecked Sendable {
 
     private func validateOwnershipMarker(for profile: CodexProfile) throws {
         let markerURL = ownershipMarkerURL(for: profile)
-        guard let data = try? Data(contentsOf: markerURL),
+        guard let data = try? BoundedFileReader.data(
+                  at: markerURL,
+                  maximumBytes: LocalControlFileLimit.ownershipMarker
+              ),
               let marker = try? JSONDecoder().decode(OwnershipMarker.self, from: data),
               marker.profileID == profile.id,
               marker.product == profile.product
@@ -1090,14 +1113,20 @@ public final class ProfileStore: @unchecked Sendable {
 
     private func recoverPendingRestoreIfNeeded() throws {
         guard fileManager.fileExists(atPath: restoreJournalURL.path) else { return }
-        let data = try Data(contentsOf: restoreJournalURL)
+        let data = try BoundedFileReader.data(
+            at: restoreJournalURL,
+            maximumBytes: LocalControlFileLimit.journal
+        )
         let journal = try JSONDecoder.codexer.decode(RestoreJournal.self, from: data)
         try recoverRestoreJournal(journal, committedProfileIDs: Set(storedProfiles.map(\.id)))
     }
 
     private func recoverPendingDeletionIfNeeded() throws {
         guard fileManager.fileExists(atPath: deletionJournalURL.path) else { return }
-        let data = try Data(contentsOf: deletionJournalURL)
+        let data = try BoundedFileReader.data(
+            at: deletionJournalURL,
+            maximumBytes: LocalControlFileLimit.journal
+        )
         let journal = try JSONDecoder.codexer.decode(DeletionJournal.self, from: data)
         try validateDeletionJournal(journal)
         if storedProfiles.contains(where: { $0.id == journal.profileID }) {
