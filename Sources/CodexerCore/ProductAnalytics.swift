@@ -12,6 +12,7 @@ public struct AnalyticsConsentStore: @unchecked Sendable {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        migrateLegacyDefaultsIfNeeded()
     }
 
     public var consent: AnalyticsConsent {
@@ -29,12 +30,6 @@ public struct AnalyticsConsentStore: @unchecked Sendable {
     }
 
     @discardableResult
-    public func enableByDefaultIfUndecided() -> UUID? {
-        guard consent == .undecided else { return installationID }
-        return grant()
-    }
-
-    @discardableResult
     public func grant() -> UUID {
         let identifier = defaults.string(forKey: Key.installationID)
             .flatMap(UUID.init(uuidString:)) ?? UUID()
@@ -49,13 +44,37 @@ public struct AnalyticsConsentStore: @unchecked Sendable {
     }
 
     public func resetDecisionAndDeleteIdentifier() {
-        defaults.removeObject(forKey: Key.consent)
+        defaults.set(AnalyticsConsent.undecided.rawValue, forKey: Key.consent)
         defaults.removeObject(forKey: Key.installationID)
     }
 
+    private func migrateLegacyDefaultsIfNeeded() {
+        if defaults.string(forKey: Key.consent) == nil {
+            let legacyValue = defaults.string(forKey: Key.legacyConsent)
+            let migrated: AnalyticsConsent
+            switch legacyValue {
+            case AnalyticsConsent.denied.rawValue:
+                migrated = .denied
+            case AnalyticsConsent.granted.rawValue,
+                 AnalyticsConsent.undecided.rawValue,
+                 nil:
+                // v1 was opt-out. Require an explicit choice before v2 sends data.
+                migrated = .undecided
+            default:
+                migrated = .denied
+            }
+            defaults.set(migrated.rawValue, forKey: Key.consent)
+        }
+        // Keep older builds fail-closed after an upgrade and sever the old identifier.
+        defaults.set(AnalyticsConsent.denied.rawValue, forKey: Key.legacyConsent)
+        defaults.removeObject(forKey: Key.legacyInstallationID)
+    }
+
     private enum Key {
-        static let consent = "AgentDock.analyticsConsent.v1"
-        static let installationID = "AgentDock.analyticsInstallationID.v1"
+        static let consent = "AgentDock.analyticsConsent.v2"
+        static let installationID = "AgentDock.analyticsInstallationID.v2"
+        static let legacyConsent = "AgentDock.analyticsConsent.v1"
+        static let legacyInstallationID = "AgentDock.analyticsInstallationID.v1"
     }
 }
 
@@ -370,6 +389,7 @@ public final class ProductAnalytics: @unchecked Sendable {
     private let logger = Logger(subsystem: "dev.euforic.agentdock", category: "ProductAnalytics")
     private static let flushAt = 12
     private static let maximumPendingEvents = 48
+    private static let maximumActiveBatches = 1
     private static let flushDelay: TimeInterval = 5
 
     public init(
@@ -379,7 +399,6 @@ public final class ProductAnalytics: @unchecked Sendable {
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         architecture: String = ProductAnalytics.currentArchitecture
     ) {
-        consentStore.enableByDefaultIfUndecided()
         self.consentStore = consentStore
         self.configuration = configuration
         self.appVersion = Self.safeVersion(appVersion)
@@ -423,7 +442,7 @@ public final class ProductAnalytics: @unchecked Sendable {
         guard let event, payload(for: event) != nil else { return }
         deliveryQueue.async { [weak self] in
             guard let self, self.consentStore.consent == .granted else { return }
-            if self.pendingEvents.count == Self.maximumPendingEvents {
+            if self.pendingEvents.count >= Self.maximumPendingEvents {
                 self.pendingEvents.removeFirst()
             }
             self.pendingEvents.append(event)
@@ -479,6 +498,10 @@ public final class ProductAnalytics: @unchecked Sendable {
             pendingEvents.removeAll(keepingCapacity: false)
             return
         }
+        guard activeTasks.count < Self.maximumActiveBatches else {
+            scheduleFlushLocked()
+            return
+        }
         let batch = pendingEvents.compactMap(payload(for:))
         pendingEvents.removeAll(keepingCapacity: true)
         guard !batch.isEmpty else { return }
@@ -501,10 +524,21 @@ public final class ProductAnalytics: @unchecked Sendable {
                 } else {
                     self.successfulBatches += 1
                 }
+                if !self.pendingEvents.isEmpty {
+                    self.flushLocked()
+                }
             }
         }
         activeTasks[deliveryID] = task
         task.resume()
+    }
+
+    private func scheduleFlushLocked() {
+        dispatchPrecondition(condition: .onQueue(deliveryQueue))
+        guard scheduledFlush == nil else { return }
+        let work = DispatchWorkItem { [weak self] in self?.flushLocked() }
+        scheduledFlush = work
+        deliveryQueue.asyncAfter(deadline: .now() + Self.flushDelay, execute: work)
     }
 
     static func deliveryFailure(response: URLResponse?, error: Error?) -> AnalyticsDeliveryFailure? {

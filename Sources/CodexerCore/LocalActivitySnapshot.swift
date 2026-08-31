@@ -197,15 +197,14 @@ public struct LocalActivityReader: @unchecked Sendable {
         }
 
         do {
+            let databaseArgument = try SQLiteReadOnly.databaseArgument(for: databaseURL)
             let result = try BoundedSubprocess.run(
                 executableURL: Self.sqliteURL,
                 arguments: [
+                    "-nofollow",
                     "-readonly",
                     "-json",
-                    SQLiteReadOnly.databaseArgument(
-                        for: databaseURL,
-                        fileManager: fileManager
-                    ),
+                    databaseArgument,
                     query
                 ],
                 timeout: timeout,

@@ -76,7 +76,10 @@ public final class ShortcutInstaller: @unchecked Sendable {
         guard shortcutExists(for: profile) else { return false }
         let infoPlistURL = profile.shortcutPath.appendingPathComponent("Contents/Info.plist")
         guard
-            let data = try? Data(contentsOf: infoPlistURL, options: .mappedIfSafe),
+            let data = try? BoundedFileReader.data(
+                at: infoPlistURL,
+                maximumBytes: LocalControlFileLimit.propertyList
+            ),
             let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
                 as? [String: Any],
             let installedVersion = plist["CFBundleVersion"] as? String

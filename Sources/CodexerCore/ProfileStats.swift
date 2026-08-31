@@ -13,6 +13,7 @@ public struct ProfileStats: Equatable, Sendable {
     public var weeklyWarnings: Int
     public var weeklyErrors: Int
     public var dataBytes: Int64
+    public var dataSizeIsTruncated: Bool
     public var lastActivityAt: Date?
     public var jobCounts: [String: Int]
     public var tokenizedSessions: Int
@@ -33,6 +34,7 @@ public struct ProfileStats: Equatable, Sendable {
         weeklyWarnings: 0,
         weeklyErrors: 0,
         dataBytes: 0,
+        dataSizeIsTruncated: false,
         lastActivityAt: nil,
         jobCounts: [:],
         tokenizedSessions: 0,
@@ -92,19 +94,28 @@ public final class ProfileStatsScanner: @unchecked Sendable {
     private let sqliteExecutable: URL
     private let queryTimeout: TimeInterval
     private let claudeChatScanner: LocalChatScanner
+    private let dataSizeMaximumEntries: Int
+    private let dataSizeMaximumDepth: Int
+    private let dataSizeTimeout: TimeInterval
     private let dataSizeCacheLock = NSLock()
-    private var dataSizeCache: [String: (measuredAt: Date, bytes: Int64)] = [:]
+    private var dataSizeCache: [String: (measuredAt: Date, measurement: DirectorySizeMeasurement)] = [:]
 
     public init(
         fileManager: FileManager = .default,
         sqliteExecutable: URL = URL(fileURLWithPath: "/usr/bin/sqlite3"),
         queryTimeout: TimeInterval = 10,
-        claudeChatScanner: LocalChatScanner = LocalChatScanner(maximumSessions: 10_000)
+        claudeChatScanner: LocalChatScanner = LocalChatScanner(maximumSessions: 10_000),
+        dataSizeMaximumEntries: Int = 100_000,
+        dataSizeMaximumDepth: Int = 64,
+        dataSizeTimeout: TimeInterval = 2
     ) {
         self.fileManager = fileManager
         self.sqliteExecutable = sqliteExecutable
         self.queryTimeout = queryTimeout
         self.claudeChatScanner = claudeChatScanner
+        self.dataSizeMaximumEntries = max(1, dataSizeMaximumEntries)
+        self.dataSizeMaximumDepth = max(1, dataSizeMaximumDepth)
+        self.dataSizeTimeout = max(0.01, dataSizeTimeout)
     }
 
     public func stats(for profile: CodexProfile, now: Date = Date()) -> ProfileStats {
@@ -150,7 +161,9 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         let logsDatabase = codexHomeURL.appendingPathComponent("logs_2.sqlite")
 
         var stats = ProfileStats.empty
-        stats.dataBytes = cachedDirectorySize(dataRootURL, now: now)
+        let dataSize = cachedDirectorySize(dataRootURL, now: now)
+        stats.dataBytes = dataSize.bytes
+        stats.dataSizeIsTruncated = dataSize.truncated
         guard !Task.isCancelled else { return stats }
 
         if fileManager.fileExists(atPath: stateDatabase.path) {
@@ -266,7 +279,9 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         now: Date
     ) -> ProfileStats {
         var stats = ProfileStats.empty
-        stats.dataBytes = cachedDirectorySize(dataRootURL, now: now)
+        let dataSize = cachedDirectorySize(dataRootURL, now: now)
+        stats.dataBytes = dataSize.bytes
+        stats.dataSizeIsTruncated = dataSize.truncated
         guard !Task.isCancelled else { return stats }
 
         let weekStart = now.addingTimeInterval(-7 * 24 * 60 * 60)
@@ -414,14 +429,22 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         operation: String,
         errors: inout [String]
     ) -> [[String]] {
+        let databaseArgument: String
+        do {
+            databaseArgument = try SQLiteReadOnly.databaseArgument(for: database)
+        } catch {
+            errors.append("Could not read \(operation): the database path is not safe.")
+            return []
+        }
         let process = Process()
         process.executableURL = sqliteExecutable
         process.arguments = [
+            "-nofollow",
             "-readonly",
             "-noheader",
             "-separator",
             "\u{1F}",
-            SQLiteReadOnly.databaseArgument(for: database, fileManager: fileManager),
+            databaseArgument,
             sql
         ]
 
@@ -485,47 +508,85 @@ public final class ProfileStatsScanner: @unchecked Sendable {
         }
     }
 
-    private func directorySize(_ url: URL) -> Int64 {
+    private func directorySize(_ url: URL) -> DirectorySizeMeasurement {
         guard let enumerator = fileManager.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey],
+            includingPropertiesForKeys: [
+                .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey
+            ],
             options: []
         ) else {
-            return 0
+            return DirectorySizeMeasurement(bytes: 0, truncated: false, cancelled: false)
         }
 
+        let deadline = DispatchTime.now().uptimeNanoseconds
+            + UInt64(dataSizeTimeout * 1_000_000_000)
         var total: Int64 = 0
+        var visited = 0
         for case let fileURL as URL in enumerator {
-            guard !Task.isCancelled else { return total }
+            guard !Task.isCancelled else {
+                return DirectorySizeMeasurement(bytes: total, truncated: true, cancelled: true)
+            }
+            guard DispatchTime.now().uptimeNanoseconds < deadline else {
+                return DirectorySizeMeasurement(bytes: total, truncated: true, cancelled: false)
+            }
+            guard visited < dataSizeMaximumEntries else {
+                return DirectorySizeMeasurement(bytes: total, truncated: true, cancelled: false)
+            }
+            visited += 1
+            if enumerator.level > dataSizeMaximumDepth {
+                enumerator.skipDescendants()
+                continue
+            }
             guard
-                let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+                let values = try? fileURL.resourceValues(forKeys: [
+                    .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey
+                ]),
+                values.isSymbolicLink != true,
                 values.isRegularFile == true
             else {
                 continue
             }
-            total += Int64(values.fileSize ?? 0)
+            let size = Int64(max(0, values.fileSize ?? 0))
+            let (sum, overflow) = total.addingReportingOverflow(size)
+            if overflow {
+                return DirectorySizeMeasurement(
+                    bytes: Int64.max,
+                    truncated: true,
+                    cancelled: false
+                )
+            }
+            total = sum
         }
-        return total
+        return DirectorySizeMeasurement(bytes: total, truncated: false, cancelled: false)
     }
 
-    private func cachedDirectorySize(_ url: URL, now: Date) -> Int64 {
+    private func cachedDirectorySize(_ url: URL, now: Date) -> DirectorySizeMeasurement {
         let key = url.standardizedFileURL.path
         if let cached = dataSizeCacheLock.withLock({ dataSizeCache[key] }),
            now.timeIntervalSince(cached.measuredAt) < 60
         {
-            return cached.bytes
+            return cached.measurement
         }
-        let bytes = directorySize(url)
-        dataSizeCacheLock.withLock {
-            dataSizeCache[key] = (now, bytes)
+        let measurement = directorySize(url)
+        if !measurement.cancelled {
+            dataSizeCacheLock.withLock {
+                dataSizeCache[key] = (now, measurement)
+            }
         }
-        return bytes
+        return measurement
     }
 
     private func int(_ value: String) -> Int {
         Int(value) ?? 0
     }
 
+}
+
+private struct DirectorySizeMeasurement: Sendable {
+    var bytes: Int64
+    var truncated: Bool
+    var cancelled: Bool
 }
 
 private extension NSLock {

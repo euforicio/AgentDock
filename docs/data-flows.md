@@ -45,17 +45,17 @@ profile path.
 2. Native OpenAI profiles retain the signed bundled app-server flow and call
    `account/rateLimits/read` with the selected `CODEX_HOME`.
 3. For a selected custom provider, AgentDock resolves the matching
-   `model_providers.<id>.base_url` and requests its OpenAI-compatible
-   `<base_url>/organization/usage/completions` endpoint for the trailing seven
-   days, using one-day buckets.
+   `model_providers.<id>.base_url` and requests its `<base_url>/usage` quota
+   endpoint.
 4. HTTPS is accepted. Plain HTTP is accepted only for loopback providers;
    redirects must remain on the same safe origin. Requests and responses are
    time- and size-bounded.
 5. Provider headers, environment-backed headers, bearer-token environment
    keys, and query parameters are applied in memory. Their values and response
    bodies are never logged or added to analytics.
-6. Returned token and model-request counts are summed into a seven-day activity
-   summary. The endpoint does not expose an allowance percentage.
+6. Returned allowance meters are validated and shown with their percentage
+   consumed, window, and reset time. Seven-day windows use the same Weekly
+   presentation as native Codex limits.
 7. A missing, unsafe, unsupported, or failed custom-provider usage endpoint is
    shown as unavailable for that provider. AgentDock never substitutes native
    OpenAI quota for traffic sent to another provider.
@@ -109,15 +109,16 @@ disappearing.
 
 ## Product Analytics
 
-1. On first initialization, an undecided installation is enabled by default and
-   receives a random UUID unrelated to local or provider data.
-2. An explicit prior opt-out remains denied and capture exits without a payload,
-   network request, or installation identifier.
+1. An undecided installation sends nothing and has no analytics identifier.
+2. When delivery is configured, the app asks for consent. An explicit grant
+   creates a random UUID unrelated to local or provider data; denial exits
+   without a payload, network request, or identifier.
 3. Call sites submit closed enum events to the single core boundary.
 4. The boundary validates properties, adds minimal platform context, disables
    GeoIP/person profiles, and holds at most 48 events in memory.
 5. Up to twelve events are sent in a bounded HTTPS batch after at most five
-   seconds. Failures are dropped without logs or persistent retries.
+   seconds, with only one active delivery at a time. Failures are dropped
+   without persistent retries or raw error logging.
 6. Opt-out synchronously purges pending events and deletes the UUID; re-enabling
    creates an unlinkable replacement.
 

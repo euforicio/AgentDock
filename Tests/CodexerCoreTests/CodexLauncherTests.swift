@@ -316,7 +316,10 @@ final class CodexLauncherTests: XCTestCase {
     func testCancellingWindowPresentationStopsFreshInstance() async throws {
         let profile = makeProfile(slug: "cancelled-window")
         try prepareIsolationLayout(for: profile)
-        let lifecycle = WindowlessLifecycleController(processID: 743)
+        let presentationRequested = expectation(description: "presentation requested")
+        let lifecycle = WindowlessLifecycleController(processID: 743) {
+            presentationRequested.fulfill()
+        }
         let controller = CodexInstanceController(
             validator: AcceptingValidator(),
             processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
@@ -328,7 +331,7 @@ final class CodexLauncherTests: XCTestCase {
         let task = Task {
             try await controller.open(profile: profile, codexAppURL: codexAppURL)
         }
-        try await Task.sleep(for: .milliseconds(20))
+        await fulfillment(of: [presentationRequested], timeout: 1)
         task.cancel()
 
         do {
@@ -363,7 +366,10 @@ final class CodexLauncherTests: XCTestCase {
     func testCancellingPostLaunchValidationStopsReturnedProcess() async throws {
         let profile = makeProfile(slug: "cancelled")
         try prepareIsolationLayout(for: profile)
-        let lifecycle = RejectingLaunchedProcessController()
+        let verificationRequested = expectation(description: "launch verification requested")
+        let lifecycle = RejectingLaunchedProcessController {
+            verificationRequested.fulfill()
+        }
         let controller = CodexInstanceController(
             validator: AcceptingValidator(),
             processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
@@ -375,7 +381,7 @@ final class CodexLauncherTests: XCTestCase {
         let task = Task {
             try await controller.open(profile: profile, codexAppURL: codexAppURL)
         }
-        try await Task.sleep(for: .milliseconds(20))
+        await fulfillment(of: [verificationRequested], timeout: 1)
         task.cancel()
 
         do {
@@ -1226,6 +1232,11 @@ private struct LifecycleBackedTreeProvider: ProcessTreeSnapshotProviding {
 
 private final class RejectingLaunchedProcessController: CodexApplicationLifecycleControlling, @unchecked Sendable {
     private(set) var invalidatedProcessIDs: [Int32] = []
+    private let onVerificationRequested: () -> Void
+
+    init(onVerificationRequested: @escaping () -> Void = {}) {
+        self.onVerificationRequested = onVerificationRequested
+    }
 
     func focus(processID _: Int32, configuration _: IsolatedCodexLaunchConfiguration) -> Bool { false }
     func terminate(processID _: Int32, configuration _: IsolatedCodexLaunchConfiguration) -> Bool { false }
@@ -1233,7 +1244,10 @@ private final class RejectingLaunchedProcessController: CodexApplicationLifecycl
     func isVerifiedRunning(
         processID _: Int32,
         configuration _: IsolatedCodexLaunchConfiguration
-    ) -> Bool { false }
+    ) -> Bool {
+        onVerificationRequested()
+        return false
+    }
     func invalidateUnverifiedLaunch(
         processID: Int32,
         configuration _: IsolatedCodexLaunchConfiguration
@@ -1246,9 +1260,11 @@ private final class WindowlessLifecycleController: CodexApplicationLifecycleCont
     let processID: Int32
     private(set) var presentationRequests: [Int32] = []
     private(set) var terminatedProcessIDs: [Int32] = []
+    private let onPresentationRequested: () -> Void
 
-    init(processID: Int32) {
+    init(processID: Int32, onPresentationRequested: @escaping () -> Void = {}) {
         self.processID = processID
+        self.onPresentationRequested = onPresentationRequested
     }
 
     func focus(
@@ -1263,6 +1279,7 @@ private final class WindowlessLifecycleController: CodexApplicationLifecycleCont
         configuration _: IsolatedCodexLaunchConfiguration
     ) -> Bool {
         presentationRequests.append(processID)
+        onPresentationRequested()
         return true
     }
 

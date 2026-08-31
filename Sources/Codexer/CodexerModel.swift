@@ -81,6 +81,7 @@ final class CodexerModel: ObservableObject {
     private var chatChangeMonitorTask: Task<Void, Never>?
     private var profileActivityRefreshTask: Task<Void, Never>?
     private var workspaceNotificationTasks: [Task<Void, Never>] = []
+    private var workspaceRefreshTask: Task<Void, Never>?
     private var allowsAutomaticRefresh = false
     private var statsGeneration = 0
     private var rateLimitGeneration = 0
@@ -204,6 +205,7 @@ final class CodexerModel: ObservableObject {
         chatChangeMonitorTask?.cancel()
         profileActivityRefreshTask?.cancel()
         workspaceNotificationTasks.forEach { $0.cancel() }
+        workspaceRefreshTask?.cancel()
     }
 
     var codexAppURL: URL {
@@ -1577,9 +1579,14 @@ final class CodexerModel: ObservableObject {
         ] {
             workspaceNotificationTasks.append(
                 Task { [weak self] in
-                    for await _ in center.notifications(named: name) {
+                    for await notification in center.notifications(named: name) {
                         guard !Task.isCancelled else { return }
-                        await self?.refreshInstanceStatuses()
+                        let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                            as? NSRunningApplication
+                        guard Self.isRelevantWorkspaceBundleIdentifier(
+                            application?.bundleIdentifier
+                        ) else { continue }
+                        self?.scheduleWorkspaceStatusRefresh()
                     }
                 }
             )
@@ -1594,6 +1601,23 @@ final class CodexerModel: ObservableObject {
                     return
                 }
             }
+        }
+    }
+
+    nonisolated static func isRelevantWorkspaceBundleIdentifier(_ identifier: String?) -> Bool {
+        identifier == DesktopAppRegistry.codex.bundleIdentifier
+            || identifier == DesktopAppRegistry.claude.bundleIdentifier
+    }
+
+    private func scheduleWorkspaceStatusRefresh() {
+        workspaceRefreshTask?.cancel()
+        workspaceRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return
+            }
+            await self?.refreshInstanceStatuses()
         }
     }
 

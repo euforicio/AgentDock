@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 public final class CodexRateLimitClient: @unchecked Sendable {
@@ -108,30 +107,11 @@ enum CodexProviderConfiguration: Equatable, Sendable {
     }
 
     private static func readBoundedConfig(at url: URL) throws -> String {
-        let values = try url.resourceValues(
-            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
-        )
-        guard values.isRegularFile == true,
-              values.isSymbolicLink != true,
-              let fileSize = values.fileSize,
-              fileSize <= maximumConfigBytes
-        else {
+        let data: Data
+        do {
+            data = try BoundedFileReader.data(at: url, maximumBytes: maximumConfigBytes)
+        } catch {
             throw CodexProviderConfigurationError.unsafeConfig
-        }
-        let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else { throw CodexProviderConfigurationError.unsafeConfig }
-        defer { Darwin.close(descriptor) }
-
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 16_384)
-        while true {
-            let count = Darwin.read(descriptor, &buffer, buffer.count)
-            guard count >= 0 else { throw CodexProviderConfigurationError.unsafeConfig }
-            if count == 0 { break }
-            guard data.count + count <= maximumConfigBytes else {
-                throw CodexProviderConfigurationError.unsafeConfig
-            }
-            data.append(buffer, count: count)
         }
         guard let content = String(data: data, encoding: .utf8) else {
             throw CodexProviderConfigurationError.invalidEncoding
@@ -388,7 +368,7 @@ private final class CustomProviderRateLimitClient: NSObject, URLSessionTaskDeleg
                 return failure(provider, "The provider usage request failed (HTTP \(response.statusCode)).")
             }
             var data = Data()
-            if response.expectedContentLength > maximumResponseBytes {
+            if response.expectedContentLength > Int64(maximumResponseBytes) {
                 return failure(provider, "The provider usage response was too large.")
             }
             for try await byte in bytes {
@@ -397,7 +377,7 @@ private final class CustomProviderRateLimitClient: NSObject, URLSessionTaskDeleg
                 }
                 data.append(byte)
             }
-            return try CustomProviderUsageParser.parse(data)
+            return try CustomProviderUsageParser.parse(data, providerName: provider.name)
         } catch is CancellationError {
             return failure(provider, "Usage-limit refresh was cancelled.")
         } catch {
@@ -467,25 +447,13 @@ private final class CustomProviderRateLimitClient: NSObject, URLSessionTaskDeleg
 }
 
 enum CustomProviderEndpoint {
-    static func usageURL(
-        _ provider: CustomCodexProvider,
-        now: Date = Date()
-    ) -> URL? {
+    static func usageURL(_ provider: CustomCodexProvider) -> URL? {
         guard isSafeBaseURL(provider.baseURL) else { return nil }
         guard var components = URLComponents(
-            url: provider.baseURL
-                .appendingPathComponent("organization")
-                .appendingPathComponent("usage")
-                .appendingPathComponent("completions"),
+            url: provider.baseURL.appendingPathComponent("usage"),
             resolvingAgainstBaseURL: false
         ) else { return nil }
-        var queryParameters = provider.queryParameters
-        let endTime = Int64(now.timeIntervalSince1970)
-        queryParameters["start_time"] = String(endTime - 7 * 24 * 60 * 60)
-        queryParameters["end_time"] = String(endTime)
-        queryParameters["bucket_width"] = "1d"
-        queryParameters["limit"] = "7"
-        let configuredItems = queryParameters.sorted { $0.key < $1.key }.map {
+        let configuredItems = provider.queryParameters.sorted { $0.key < $1.key }.map {
             URLQueryItem(name: $0.key, value: $0.value)
         }
         components.queryItems = (components.queryItems ?? []) + configuredItems
@@ -523,58 +491,137 @@ enum CustomProviderEndpoint {
 enum CustomProviderUsageParser {
     static func parse(
         _ data: Data,
+        providerName: String,
         fetchedAt: Date = Date()
     ) throws -> ProfileRateLimits {
-        let page = try JSONDecoder().decode(OrganizationCompletionsUsagePage.self, from: data)
-        guard !page.data.isEmpty,
-              let startsAt = page.data.map(\.startTime).min(),
-              let endsAt = page.data.map(\.endTime).max()
-        else { throw CustomProviderUsageError.missingBuckets }
-        let results = page.data.flatMap(\.results)
+        let snapshot = try JSONDecoder().decode(ProviderUsageSnapshot.self, from: data)
+        guard !snapshot.meters.isEmpty,
+              snapshot.meters.count <= 64
+        else { throw CustomProviderUsageError.invalidMeters }
+
+        var credits: CreditsUsage?
+        var buckets: [RateLimitBucket] = []
+        for meter in snapshot.meters {
+            guard let id = cleanText(meter.id, maximumLength: 64) else { continue }
+            if id == "credits" {
+                guard let remaining = remainingAmount(for: meter),
+                      let balance = formattedAmount(remaining, unit: meter.amountUnit)
+                else { continue }
+                let limit = validAmount(meter.limitAmount)
+                credits = CreditsUsage(
+                    hasCredits: (limit ?? remaining) > 0,
+                    unlimited: false,
+                    balance: balance
+                )
+                continue
+            }
+            guard let usedPercent = meter.usedPercent,
+                  usedPercent.isFinite
+            else { continue }
+            let windowMinutes = meter.windowSeconds.flatMap { seconds -> Int? in
+                guard seconds > 0, seconds <= 315_576_000 else { return nil }
+                return Int(seconds / 60)
+            }
+            buckets.append(RateLimitBucket(
+                id: id,
+                name: cleanText(meter.label, maximumLength: 80) ?? id,
+                primary: RateLimitWindowUsage(
+                    usedPercent: min(max(usedPercent, 0), 100),
+                    windowDurationMins: windowMinutes,
+                    resetsAt: meter.resetsAt.flatMap(parseDate)
+                ),
+                secondary: nil
+            ))
+        }
+        guard !buckets.isEmpty || credits != nil else {
+            throw CustomProviderUsageError.invalidMeters
+        }
         return ProfileRateLimits(
-            apiUsage: APIUsageSummary(
-                inputTokens: results.reduce(0) { $0 + $1.inputTokens },
-                outputTokens: results.reduce(0) { $0 + $1.outputTokens },
-                cachedInputTokens: results.reduce(0) { $0 + $1.cachedInputTokens },
-                requestCount: results.reduce(0) { $0 + $1.requestCount },
-                startsAt: Date(timeIntervalSince1970: TimeInterval(startsAt)),
-                endsAt: Date(timeIntervalSince1970: TimeInterval(endsAt))
-            ),
-            fetchedAt: fetchedAt
+            planType: cleanText(snapshot.plan, maximumLength: 64),
+            buckets: buckets,
+            credits: credits,
+            fetchedAt: fetchedAt,
+            warningMessage: snapshot.object == nil
+                ? "Usage limits were read from \(cleanText(providerName, maximumLength: 64) ?? "the provider")'s quota API."
+                : nil
         )
     }
-}
 
-private struct OrganizationCompletionsUsagePage: Decodable {
-    var data: [OrganizationCompletionsUsageBucket]
-}
-
-private struct OrganizationCompletionsUsageBucket: Decodable {
-    var startTime: Int64
-    var endTime: Int64
-    var results: [OrganizationCompletionsUsageResult]
-
-    enum CodingKeys: String, CodingKey {
-        case startTime = "start_time"
-        case endTime = "end_time"
-        case results
+    private static func remainingAmount(for meter: ProviderUsageMeter) -> Double? {
+        if let remaining = validAmount(meter.remainingAmount) {
+            return remaining
+        }
+        guard let limit = validAmount(meter.limitAmount),
+              let used = validAmount(meter.usedAmount)
+        else { return nil }
+        return max(0, limit - used)
     }
-}
 
-private struct OrganizationCompletionsUsageResult: Decodable {
-    var inputTokens: Int64
-    var outputTokens: Int64
-    var cachedInputTokens: Int64
-    var requestCount: Int64
+    private static func validAmount(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value >= 0, value <= 1_000_000_000_000_000 else {
+            return nil
+        }
+        return value
+    }
 
-    enum CodingKeys: String, CodingKey {
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
-        case cachedInputTokens = "input_cached_tokens"
-        case requestCount = "num_model_requests"
+    private static func formattedAmount(_ value: Double, unit: String?) -> String? {
+        guard let value = validAmount(value) else { return nil }
+        let format = value.rounded() == value ? "%.0f" : "%.2f"
+        let number = String(format: format, locale: Locale(identifier: "en_US_POSIX"), value)
+        guard let unit = cleanText(unit, maximumLength: 12)?.uppercased() else {
+            return number
+        }
+        return "\(number) \(unit)"
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        guard value.utf8.count <= 64 else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+
+    private static func cleanText(_ value: String?, maximumLength: Int) -> String? {
+        guard let value else { return nil }
+        let cleaned = value.unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0)
+        }
+        let result = String(String.UnicodeScalarView(cleaned))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else { return nil }
+        return String(result.prefix(maximumLength))
     }
 }
 
 private enum CustomProviderUsageError: Error {
-    case missingBuckets
+    case invalidMeters
+}
+
+private struct ProviderUsageSnapshot: Decodable {
+    var object: String?
+    var plan: String?
+    var meters: [ProviderUsageMeter]
+}
+
+private struct ProviderUsageMeter: Decodable {
+    var id: String
+    var label: String?
+    var usedPercent: Double?
+    var resetsAt: String?
+    var windowSeconds: Int64?
+    var usedAmount: Double?
+    var limitAmount: Double?
+    var remainingAmount: Double?
+    var amountUnit: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label
+        case usedPercent = "used_percent"
+        case resetsAt = "resets_at"
+        case windowSeconds = "window_seconds"
+        case usedAmount = "used_amount"
+        case limitAmount = "limit_amount"
+        case remainingAmount = "remaining_amount"
+        case amountUnit = "amount_unit"
+    }
 }

@@ -49,11 +49,8 @@ final class CodexRateLimitClientTests: XCTestCase {
         XCTAssertEqual(provider.environmentHeaders, ["X-Workspace": "SYNTHETIC_WORKSPACE"])
         XCTAssertEqual(provider.queryParameters, ["region": "local"])
         XCTAssertEqual(
-            CustomProviderEndpoint.usageURL(
-                provider,
-                now: Date(timeIntervalSince1970: 1_000_000)
-            )?.absoluteString,
-            "http://127.0.0.1:32124/v1/organization/usage/completions?bucket_width=1d&end_time=1000000&limit=7&region=local&start_time=395200"
+            CustomProviderEndpoint.usageURL(provider)?.absoluteString,
+            "http://127.0.0.1:32124/v1/usage?region=local"
         )
     }
 
@@ -76,58 +73,72 @@ final class CodexRateLimitClientTests: XCTestCase {
         XCTAssertNil(CustomProviderEndpoint.usageURL(provider("https://user:secret@provider.example/v1")))
     }
 
-    func testParsesOrganizationCompletionsUsage() throws {
+    func testParsesNormalizedProviderQuotaMeters() throws {
+        let reset = "2099-01-01T00:00:00Z"
         let data = Data(#"""
         {
-          "object":"page",
-          "data":[
+          "object":"cursor.usage",
+          "plan":"business",
+          "meters":[
             {
-              "object":"bucket",
-              "start_time":100,
-              "end_time":200,
-              "results":[
-                {
-                  "object":"organization.usage.completions.result",
-                  "input_tokens":1000,
-                  "output_tokens":200,
-                  "input_cached_tokens":300,
-                  "num_model_requests":4
-                }
-              ]
+              "id":"grok_bot_weekly",
+              "label":"Grok Bot weekly",
+              "used_percent":37.5,
+              "window_seconds":604800,
+              "resets_at":"\#(reset)"
             },
             {
-              "object":"bucket",
-              "start_time":200,
-              "end_time":300,
-              "results":[
-                {
-                  "object":"organization.usage.completions.result",
-                  "input_tokens":500,
-                  "output_tokens":50,
-                  "input_cached_tokens":100,
-                  "num_model_requests":2
-                }
-              ]
+              "id":"credits",
+              "label":"Credits",
+              "remaining_amount":12.5,
+              "limit_amount":20,
+              "amount_unit":"usd"
             }
-          ],
-          "has_more":false,
-          "next_page":null
+          ]
         }
         """#.utf8)
 
         let limits = try CustomProviderUsageParser.parse(
             data,
+            providerName: "Cursor Bridge",
             fetchedAt: Date(timeIntervalSince1970: 100)
         )
 
-        XCTAssertEqual(limits.apiUsage?.inputTokens, 1_500)
-        XCTAssertEqual(limits.apiUsage?.outputTokens, 250)
-        XCTAssertEqual(limits.apiUsage?.cachedInputTokens, 400)
-        XCTAssertEqual(limits.apiUsage?.requestCount, 6)
-        XCTAssertEqual(limits.apiUsage?.totalTokens, 1_750)
-        XCTAssertEqual(limits.apiUsage?.startsAt, Date(timeIntervalSince1970: 100))
-        XCTAssertEqual(limits.apiUsage?.endsAt, Date(timeIntervalSince1970: 300))
+        XCTAssertEqual(limits.planType, "business")
+        XCTAssertEqual(limits.buckets.map(\.id), ["grok_bot_weekly"])
+        XCTAssertEqual(limits.buckets.first?.primary?.usedPercent, 37.5)
+        XCTAssertEqual(limits.buckets.first?.primary?.windowDurationMins, 10_080)
+        XCTAssertEqual(limits.buckets.first?.primary?.resetsAt, ISO8601DateFormatter().date(from: reset))
+        XCTAssertEqual(limits.credits?.balance, "12.50 USD")
         XCTAssertEqual(limits.fetchedAt, Date(timeIntervalSince1970: 100))
+    }
+
+    func testRejectsOrSkipsInvalidProviderQuotaValuesWithoutOverflowing() throws {
+        let data = Data(#"""
+        {
+          "meters":[
+            {"id":"large-percent","used_percent":1e308},
+            {"id":"negative-credit","remaining_amount":-1},
+            {"id":"huge-credit","remaining_amount":1e308},
+            {"id":"valid","used_percent":125,"window_seconds":3600}
+          ]
+        }
+        """#.utf8)
+
+        let limits = try CustomProviderUsageParser.parse(data, providerName: "Synthetic")
+
+        XCTAssertEqual(limits.buckets.map(\.id), ["large-percent", "valid"])
+        XCTAssertTrue(limits.buckets.allSatisfy { $0.primary?.usedPercent == 100 })
+        XCTAssertNil(limits.credits)
+    }
+
+    func testRejectsExcessiveProviderMeterCount() {
+        let meters = (0..<65).map { "{\"id\":\"m\($0)\",\"used_percent\":1}" }.joined(separator: ",")
+        let data = Data("{\"meters\":[\(meters)]}".utf8)
+
+        XCTAssertThrowsError(
+            try CustomProviderUsageParser.parse(data, providerName: "Synthetic")
+        )
     }
 
     private func provider(_ baseURL: String) -> CustomCodexProvider {

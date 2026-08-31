@@ -270,17 +270,20 @@ public struct LocalChatScanDiagnostics: Equatable, Sendable {
     public let parsedFileCount: Int
     public let sourceFileCount: Int
     public let usedDatabase: Bool
+    public let inventoryTruncated: Bool
 
     public init(
         cacheHitCount: Int = 0,
         parsedFileCount: Int = 0,
         sourceFileCount: Int = 0,
-        usedDatabase: Bool = false
+        usedDatabase: Bool = false,
+        inventoryTruncated: Bool = false
     ) {
         self.cacheHitCount = cacheHitCount
         self.parsedFileCount = parsedFileCount
         self.sourceFileCount = sourceFileCount
         self.usedDatabase = usedDatabase
+        self.inventoryTruncated = inventoryTruncated
     }
 }
 
@@ -405,7 +408,9 @@ public struct LocalChatScanner: @unchecked Sendable {
                 parsedFileCount: primary.diagnostics.parsedFileCount
                     + fallback.diagnostics.parsedFileCount,
                 sourceFileCount: primary.diagnostics.sourceFileCount
-                    + fallback.diagnostics.sourceFileCount
+                    + fallback.diagnostics.sourceFileCount,
+                inventoryTruncated: primary.diagnostics.inventoryTruncated
+                    || fallback.diagnostics.inventoryTruncated
             )
         )
     }
@@ -1192,24 +1197,14 @@ public struct LocalChatScanner: @unchecked Sendable {
                 existing.project = project
                 recordsByID[sessionID] = existing
             } else {
-                if recordsByID.count >= maximumSessions,
-                   let oldest = recordsByID.min(by: {
-                       ($0.value.updatedAt ?? .distantPast) < ($1.value.updatedAt ?? .distantPast)
-                   }),
-                   (timestamp ?? .distantPast) > (oldest.value.updatedAt ?? .distantPast)
-                {
-                    recordsByID.removeValue(forKey: oldest.key)
-                }
-                if recordsByID.count < maximumSessions {
-                    recordsByID[sessionID] = .init(
-                        id: sessionID,
-                        sourceSessionID: rawSessionID,
-                        project: project,
-                        display: display,
-                        startedAt: timestamp,
-                        updatedAt: timestamp
-                    )
-                }
+                recordsByID[sessionID] = .init(
+                    id: sessionID,
+                    sourceSessionID: rawSessionID,
+                    project: project,
+                    display: display,
+                    startedAt: timestamp,
+                    updatedAt: timestamp
+                )
             }
             return true
         }
@@ -1217,9 +1212,9 @@ public struct LocalChatScanner: @unchecked Sendable {
         let records = recordsByID.values.sorted {
             if $0.updatedAt == $1.updatedAt { return $0.id > $1.id }
             return ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast)
-        }
+        }.prefix(maximumSessions)
         return .init(
-            records: records,
+            records: Array(records),
             changeToken: claudeCodeChangeToken(claudeHomeURL: claudeHomeURL),
             metadataBytes: min(history.fileSize, maximumMetadataBytes)
         )
@@ -1396,7 +1391,8 @@ public struct LocalChatScanner: @unchecked Sendable {
                 cacheHitCount: cacheHits,
                 parsedFileCount: parsedFiles,
                 sourceFileCount: inventory.files.count,
-                usedDatabase: !databaseRows.isEmpty
+                usedDatabase: !databaseRows.isEmpty,
+                inventoryTruncated: inventory.truncated
             )
         )
     }
@@ -1412,8 +1408,10 @@ public struct LocalChatScanner: @unchecked Sendable {
         var files: [SourceFile] = []
         var tokenParts: [String] = []
         var rootsExist = false
+        var inspectedEntries = 0
+        var truncated = false
 
-        for (root, status) in roots where fileManager.fileExists(atPath: root.path) {
+        inventory: for (root, status) in roots where fileManager.fileExists(atPath: root.path) {
             rootsExist = true
             guard let enumerator = fileManager.enumerator(
                 at: root,
@@ -1422,8 +1420,14 @@ public struct LocalChatScanner: @unchecked Sendable {
             ) else {
                 continue
             }
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-                guard !Task.isCancelled else { break }
+            for case let url as URL in enumerator {
+                guard !Task.isCancelled else { break inventory }
+                guard inspectedEntries < maximumInventoryFiles else {
+                    truncated = true
+                    break inventory
+                }
+                inspectedEntries += 1
+                guard url.pathExtension == "jsonl" else { continue }
                 guard
                     let values = try? url.resourceValues(forKeys: keys),
                     values.isRegularFile == true,
@@ -1458,7 +1462,8 @@ public struct LocalChatScanner: @unchecked Sendable {
         return SourceInventory(
             rootsExist: rootsExist,
             files: files,
-            changeToken: String(Self.fnv1a64(tokenParts.joined(separator: "\n")), radix: 16)
+            changeToken: String(Self.fnv1a64(tokenParts.joined(separator: "\n")), radix: 16),
+            truncated: truncated
         )
     }
 
@@ -1630,11 +1635,12 @@ public struct LocalChatScanner: @unchecked Sendable {
         LIMIT \(maximumSessions + max(1, maximumSessions / 4));
         """
         guard
+            let databaseArgument = try? SQLiteReadOnly.databaseArgument(for: database),
             let result = try? BoundedSubprocess.run(
                 executableURL: Self.sqliteURL,
                 arguments: [
-                    "-readonly", "-json",
-                    SQLiteReadOnly.databaseArgument(for: database, fileManager: fileManager),
+                    "-nofollow", "-readonly", "-json",
+                    databaseArgument,
                     query
                 ],
                 timeout: 3,
@@ -1687,11 +1693,12 @@ public struct LocalChatScanner: @unchecked Sendable {
 
     private func threadColumns(database: URL) -> Set<String>? {
         guard
+            let databaseArgument = try? SQLiteReadOnly.databaseArgument(for: database),
             let result = try? BoundedSubprocess.run(
                 executableURL: Self.sqliteURL,
                 arguments: [
-                    "-readonly", "-json",
-                    SQLiteReadOnly.databaseArgument(for: database, fileManager: fileManager),
+                    "-nofollow", "-readonly", "-json",
+                    databaseArgument,
                     "PRAGMA table_info(threads);"
                 ],
                 timeout: 2,
@@ -2423,7 +2430,10 @@ public struct LocalChatScanner: @unchecked Sendable {
             values.isRegularFile == true,
             let size = values.fileSize,
             size >= 0, size <= 8 * 1_024 * 1_024,
-            let data = try? Data(contentsOf: url),
+            let data = try? BoundedFileReader.data(
+                at: url,
+                maximumBytes: LocalControlFileLimit.chatIndex
+            ),
             let document = try? decoder.decode(ChatIndexDocument.self, from: data),
             document.version == Self.indexVersion,
             document.scopeKey == scopeKey,
@@ -2475,6 +2485,7 @@ public struct LocalChatScanner: @unchecked Sendable {
         let rootsExist: Bool
         let files: [SourceFile]
         let changeToken: String
+        let truncated: Bool
     }
 
     private struct ClaudeInventory {

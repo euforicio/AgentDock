@@ -333,13 +333,6 @@ public actor ClaudeInstanceController {
             return process
         }
 
-        for processID in processIDs {
-            guard let application = NSRunningApplication(processIdentifier: processID),
-                  application.terminate()
-            else {
-                throw ClaudeLauncherError.couldNotTerminate(processID)
-            }
-        }
         try processSignaler.signal(
             SIGTERM,
             identities: Array(capturedProcesses.reversed())
@@ -447,7 +440,10 @@ public actor ClaudeInstanceController {
                   .standardizedFileURL
                   .resolvingSymlinksInPath()
                   .deletingLastPathComponent() == profileDirectory,
-              let markerData = try? Data(contentsOf: markerURL),
+              let markerData = try? BoundedFileReader.data(
+                  at: markerURL,
+                  maximumBytes: LocalControlFileLimit.ownershipMarker
+              ),
               let marker = try? JSONDecoder().decode(OwnershipMarker.self, from: markerData),
               marker.profileID == profile.id,
               marker.product == .claude,

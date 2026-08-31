@@ -29,7 +29,15 @@ public struct ShortcutLauncherRunner {
         guard fileManager.fileExists(atPath: configURL.path) else {
             throw ShortcutLauncherError.missingConfig(configURL)
         }
-        let data = try Data(contentsOf: configURL)
+        let data: Data
+        do {
+            data = try BoundedFileReader.data(
+                at: configURL,
+                maximumBytes: LocalControlFileLimit.shortcutConfiguration
+            )
+        } catch {
+            throw ShortcutLauncherError.unsafeConfig(configURL)
+        }
         let configuration = try PropertyListDecoder().decode(
             IsolatedCodexLaunchConfiguration.self,
             from: data
@@ -41,6 +49,7 @@ public struct ShortcutLauncherRunner {
 public enum ShortcutLauncherError: Error, LocalizedError, Equatable {
     case missingBundle
     case missingConfig(URL)
+    case unsafeConfig(URL)
 
     public var errorDescription: String? {
         switch self {
@@ -48,6 +57,8 @@ public enum ShortcutLauncherError: Error, LocalizedError, Equatable {
             "The shortcut launcher is not running from an app bundle."
         case let .missingConfig(url):
             "Missing shortcut config at \(url.path)."
+        case let .unsafeConfig(url):
+            "The shortcut config is not a safe bounded file: \(url.path)."
         }
     }
 }

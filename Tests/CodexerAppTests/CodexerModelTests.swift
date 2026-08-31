@@ -5,6 +5,13 @@ import CodexerCore
 
 @MainActor
 final class CodexerModelTests: XCTestCase {
+    func testWorkspaceNotificationsOnlyRefreshForSupportedProviders() {
+        XCTAssertTrue(CodexerModel.isRelevantWorkspaceBundleIdentifier("com.openai.codex"))
+        XCTAssertTrue(CodexerModel.isRelevantWorkspaceBundleIdentifier("com.anthropic.claudefordesktop"))
+        XCTAssertFalse(CodexerModel.isRelevantWorkspaceBundleIdentifier("com.apple.TextEdit"))
+        XCTAssertFalse(CodexerModel.isRelevantWorkspaceBundleIdentifier(nil))
+    }
+
     private let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodexerModelTests-\(UUID().uuidString)", isDirectory: true)
         .standardizedFileURL

@@ -59,7 +59,7 @@ struct ContentView: View {
                 model.pendingDeleteProfile = nil
             }
         } message: {
-            Text("This permanently removes the profile's managed local sessions, credentials, settings, and shortcut. This cannot be undone.")
+            Text("This permanently removes the profile's managed local sessions, settings, and shortcut. Credentials in shared macOS Keychain or external provider stores are not deleted. This cannot be undone.")
         }
         .onAppear {
             model.refreshChats()
@@ -389,8 +389,10 @@ struct ContentView: View {
     private var analyticsConsentBinding: Binding<Bool> {
         Binding(
             get: {
-                AnalyticsConsentView.presentationEnabled
-                    && model.analyticsConsent == .undecided
+                AnalyticsConsentView.shouldPresent(
+                    consent: model.analyticsConsent,
+                    isConfigured: ProductAnalytics.shared.isConfigured
+                )
             },
             set: { _ in }
         )
@@ -398,6 +400,8 @@ struct ContentView: View {
 }
 
 private struct SidebarUpdateButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let presentation: AppUpdatePresentation
     let action: () -> Void
 
@@ -428,7 +432,10 @@ private struct SidebarUpdateButton: View {
             )
             .background(AgentDockPalette.blue, in: Capsule())
             .contentShape(Capsule())
-            .animation(.snappy(duration: 0.22), value: presentation.usesCompactAvailableStyle)
+            .animation(
+                reduceMotion ? nil : .snappy(duration: 0.22),
+                value: presentation.usesCompactAvailableStyle
+            )
         }
         .buttonStyle(.plain)
         .disabled(!presentation.allowsAction)

@@ -20,7 +20,7 @@ implementation, contribution, and operations details needed for focused work.
 - [Security and privacy](security.md): trust boundaries, local data handling,
   secret handling, and disclosure guidance.
 - [Privacy policy](privacy.md): local-first and revocable analytics commitments.
-- [Product analytics](analytics.md): event catalog, opt-out, PostHog operations,
+- [Product analytics](analytics.md): event catalog, opt-in, PostHog operations,
   dashboards, funnels, cohorts, and retention.
 
 ## Community Guides
@@ -37,6 +37,7 @@ against these repository sources:
 
 - Package and target graph: [`Package.swift`](../Package.swift)
 - Continuous integration and releases:
+  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) and
   [`.github/workflows/release.yml`](../.github/workflows/release.yml)
 - App packaging: [`script/build_app.sh`](../script/build_app.sh) and
   [`script/package_app.sh`](../script/package_app.sh)

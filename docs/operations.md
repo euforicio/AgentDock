@@ -30,30 +30,38 @@ in [Product analytics](analytics.md). Configure them only after reviewing the
 project region, IP capture, person profiles, access, and retention. The build
 accepts only a public `phc_` token and an official US or EU ingestion host.
 
-## Tag-Only Release Workflow
+## Continuous Integration and Tag-Only Releases
 
-`.github/workflows/release.yml` runs only when a `v*` tag is pushed. It has no
-branch, pull-request, schedule, or manual-dispatch trigger. Ordinary development
-validation remains local:
+`.github/workflows/ci.yml` validates pull requests and every push to `main`. It
+runs the root and vendored test suites, the repository privacy audit, and an
+ad-hoc build/package cycle. `.github/workflows/release.yml` remains tag-only; it
+has no branch, pull-request, schedule, or manual-dispatch trigger. Equivalent
+local validation is:
 
 ```bash
 swift test
+swift test --package-path Vendor/streamdown-swift
+./script/audit_privacy.sh
 ./script/build_app.sh
 ./script/package_app.sh
 ```
 
 The tag workflow:
 
-1. validates `vMAJOR.MINOR.PATCH` and runs the full test suite;
+1. serializes all stable releases, validates `vMAJOR.MINOR.PATCH`, requires the
+   tag commit to be on `origin/main`, rejects version rollback against tags and
+   the public appcast, and runs both test suites;
 2. builds with a monotonic numeric `CFBundleVersion` derived from the semantic
    version;
 3. signs Sparkle's nested components and AgentDock with Developer ID and the
    hardened runtime;
 4. notarizes, staples, and verifies the app and DMG with Gatekeeper;
 5. publishes the ZIP, DMG, and checksums to the immutable GitHub Release;
-6. generates an Ed25519-signed appcast whose enclosure is the tagged GitHub
-   Release ZIP;
-7. pushes `appcast.xml` to `gh-pages` only after every earlier gate succeeds.
+6. downloads the public ZIP and byte-compares it with the notarized workflow
+   artifact before generating an Ed25519-signed appcast;
+7. pushes `appcast.xml` to `gh-pages` only after every earlier gate succeeds;
+8. polls the public Pages URL until its bytes exactly match the generated feed,
+   then verifies its Ed25519 signature again.
 
 Clients use `https://euforicio.github.io/AgentDock/appcast.xml`. Configure
 GitHub Pages to publish from the root of the `gh-pages` branch before the first
@@ -102,8 +110,8 @@ to the repository's release policy. Back up the private key in an approved
 secret store; losing it prevents existing clients from trusting future updates.
 Never rotate or replace it casually.
 
-The environment also requires the existing Developer ID and notarization
-secrets:
+The protected `release` environment also gates the Developer ID, notarization,
+and appcast signing jobs. Store all of these secrets in that environment:
 
 - `DEVELOPER_ID_CERTIFICATE_PEM_BASE64`
 - `DEVELOPER_ID_PRIVATE_KEY_PEM_BASE64`

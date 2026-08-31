@@ -4,6 +4,7 @@ import SwiftUI
 
 struct AddProfileSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: CodexerModel
     @State private var product: DesktopProduct = .codex
     @State private var name = ""
@@ -93,7 +94,7 @@ struct AddProfileSheet: View {
                     .padding(.bottom, 14)
 
                     Label(
-                        "Credentials and conversations stay in this profile's local data.",
+                        "Separates supported provider app data and conversations. macOS Keychain, files, shell, network, Git, and SSH remain shared.",
                         systemImage: "lock.fill"
                     )
                     .font(.system(size: 12))
@@ -142,7 +143,7 @@ struct AddProfileSheet: View {
         )
         .background(AgentDockPalette.graphite)
         .background(AddProfileWindowConfigurator(isExpanded: customizeExpanded))
-        .animation(.easeInOut(duration: 0.18), value: customizeExpanded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: customizeExpanded)
         .onAppear {
             nameFocused = true
         }

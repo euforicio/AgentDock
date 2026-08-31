@@ -27,8 +27,30 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertEqual(stats.peakSessionTokens, 0)
         XCTAssertTrue(stats.weeklyTokenBuckets.isEmpty)
         XCTAssertEqual(stats.dataBytes, 3)
+        XCTAssertFalse(stats.dataSizeIsTruncated)
         XCTAssertNil(stats.lastActivityAt)
-        XCTAssertTrue(stats.errorMessages.isEmpty)
+        XCTAssertTrue(stats.errorMessages.isEmpty, "\(stats.errorMessages)")
+    }
+
+    func testDataSizeScanStopsAtEntryBudgetAndReportsLowerBound() throws {
+        let profile = CodexProfile(name: "Bounded", slug: "bounded", rootDirectory: root)
+        try FileManager.default.createDirectory(at: profile.codexHomePath, withIntermediateDirectories: true)
+        for index in 0..<8 {
+            try Data(repeating: UInt8(index), count: 16).write(
+                to: profile.profileDirectory.appendingPathComponent("sample-\(index).dat")
+            )
+        }
+        let scanner = ProfileStatsScanner(
+            dataSizeMaximumEntries: 3,
+            dataSizeMaximumDepth: 64,
+            dataSizeTimeout: 5
+        )
+
+        let stats = scanner.stats(for: profile)
+
+        XCTAssertTrue(stats.dataSizeIsTruncated)
+        XCTAssertGreaterThanOrEqual(stats.dataBytes, 0)
+        XCTAssertLessThan(stats.dataBytes, 8 * 16)
     }
 
     func testStatsSummarizeSessionsTokensJobsAndWeeklyLogs() throws {
@@ -89,7 +111,7 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertEqual(stats.weeklyWarnings, 1)
         XCTAssertEqual(stats.weeklyErrors, 1)
         XCTAssertEqual(stats.lastActivityAt, Date(timeIntervalSince1970: TimeInterval(recent)))
-        XCTAssertTrue(stats.errorMessages.isEmpty)
+        XCTAssertTrue(stats.errorMessages.isEmpty, "\(stats.errorMessages)")
     }
 
     func testMalformedSchemaReportsAnActionableError() throws {
@@ -124,7 +146,7 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertEqual(stats.totalSessions, 1)
         XCTAssertEqual(stats.totalTokens, 800)
         XCTAssertTrue(stats.jobCounts.isEmpty)
-        XCTAssertTrue(stats.errorMessages.isEmpty)
+        XCTAssertTrue(stats.errorMessages.isEmpty, "\(stats.errorMessages)")
     }
 
     func testThreadSchemaWithoutOptionalUsageColumnsStillReportsSessions() throws {
@@ -149,7 +171,7 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertEqual(stats.archivedSessions, 0)
         XCTAssertEqual(stats.totalTokens, 0)
         XCTAssertEqual(stats.lastActivityAt, Date(timeIntervalSince1970: 1_699_999_940))
-        XCTAssertTrue(stats.errorMessages.isEmpty)
+        XCTAssertTrue(stats.errorMessages.isEmpty, "\(stats.errorMessages)")
     }
 
     func testClosedWALDatabasesRemainReadableWithoutSidecarFiles() throws {
@@ -191,7 +213,7 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertEqual(stats.totalSessions, 1)
         XCTAssertEqual(stats.totalTokens, 1200)
         XCTAssertEqual(stats.weeklyErrors, 1)
-        XCTAssertTrue(stats.errorMessages.isEmpty)
+        XCTAssertTrue(stats.errorMessages.isEmpty, "\(stats.errorMessages)")
     }
 
     func testLargeWeeklyHistoryCompletesWithoutPipeDeadlock() throws {
@@ -221,7 +243,7 @@ final class ProfileStatsScannerTests: XCTestCase {
         XCTAssertEqual(stats.totalSessions, 10_000)
         XCTAssertFalse(stats.weeklyTokenBuckets.isEmpty)
         XCTAssertLessThan(Date().timeIntervalSince(start), 5)
-        XCTAssertTrue(stats.errorMessages.isEmpty)
+        XCTAssertTrue(stats.errorMessages.isEmpty, "\(stats.errorMessages)")
     }
 
     func testClaudeStatsAggregateProfileScopedUsageAndModels() throws {

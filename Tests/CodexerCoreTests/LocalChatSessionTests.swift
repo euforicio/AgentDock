@@ -421,6 +421,26 @@ final class LocalChatSessionTests: XCTestCase {
         XCTAssertTrue(byteBounded.sessions.isEmpty)
     }
 
+    func testCodexInventoryBoundsAllEnumeratedEntries() throws {
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        for index in 0..<20 {
+            let directory = sessions.appendingPathComponent("day-\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data(#"{"type":"session_meta","payload":{"id":"bounded-session"}}"#.utf8)
+                .write(to: directory.appendingPathComponent("rollout-\(index).jsonl"))
+        }
+
+        let result = LocalChatScanner(
+            maximumSessions: 20,
+            maximumInventoryFiles: 5,
+            indexRootURL: root.appendingPathComponent("Indexes")
+        ).scanOfficialCodex(codexHomeURL: root)
+
+        XCTAssertTrue(result.diagnostics.inventoryTruncated)
+        XCTAssertLessThanOrEqual(result.diagnostics.sourceFileCount, 5)
+    }
+
     func testClaudePollingTokenUsesMetadataWithoutReadingMetadataBodies() throws {
         let fixture = try makeCoworkFixture()
         let scanner = LocalChatScanner(indexRootURL: root.appendingPathComponent("Indexes"))
