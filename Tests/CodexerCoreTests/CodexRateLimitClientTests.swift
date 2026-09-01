@@ -64,6 +64,33 @@ final class CodexRateLimitClientTests: XCTestCase {
         )
     }
 
+    func testNamedConfigProfileOverlaysBaseConfigurationForUsageProvider() throws {
+        try Data(#"""
+        [model_providers.ollama]
+        name = "Ollama"
+        base_url = "http://127.0.0.1:11434/v1"
+        """#.utf8).write(to: root.appendingPathComponent("config.toml"))
+        try Data("model_provider = \"ollama\"\n".utf8)
+            .write(to: root.appendingPathComponent("ollama.config.toml"))
+
+        XCTAssertEqual(
+            try CodexProviderConfiguration.resolve(codexHomeURL: root),
+            .openAI
+        )
+
+        let profile = try XCTUnwrap(CodexConfigProfile(validating: "ollama"))
+        let resolved = try CodexProviderConfiguration.resolve(
+            codexHomeURL: root,
+            configProfile: profile
+        )
+        guard case let .custom(provider) = resolved else {
+            return XCTFail("Expected the named profile to select Ollama")
+        }
+        XCTAssertEqual(provider.id, "ollama")
+        XCTAssertEqual(provider.name, "Ollama")
+        XCTAssertEqual(provider.baseURL.absoluteString, "http://127.0.0.1:11434/v1")
+    }
+
     func testCustomProviderUsageAllowsHTTPSAndLoopbackHTTPOnly() throws {
         XCTAssertNotNil(CustomProviderEndpoint.usageURL(provider("https://provider.example/v1")))
         XCTAssertNotNil(CustomProviderEndpoint.usageURL(provider("http://localhost:8080/v1")))

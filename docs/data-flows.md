@@ -10,13 +10,17 @@
    identity.
 4. Before a new Codex launch, AgentDock closes any provider-signed orphan helper
    whose live executable remains contained by that profile's `CODEX_HOME`.
-5. When the profile selects a custom Codex provider profile, AgentDock validates
-   its user-selected executable and passes it through `CODEX_CLI_PATH`. The
-   Built-in Codex choice pins the CLI bundled with the selected Codex app.
+5. AgentDock resolves the persisted Codex launch selection to the app default,
+   Built-in Codex, or a safe profile-local `<name>.config.toml`. Named profiles
+   are passed to the bundled CLI through `--profile <name>`.
 6. AgentDock starts a new provider instance with the profile-specific local
    state contract.
 7. Post-launch discovery verifies the returned process before the UI marks the
    profile as running.
+
+Changing the selection for a running Codex profile closes that exact instance,
+persists the new choice, refreshes its shortcut, and reopens it. A missing or
+unsafe named profile fails before the running instance is closed.
 
 Failed persistence or validation rolls back partial state where safe. A
 destructive delete uses a separate confirmation and fails closed while the

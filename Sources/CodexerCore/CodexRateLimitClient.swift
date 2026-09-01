@@ -18,17 +18,34 @@ public final class CodexRateLimitClient: @unchecked Sendable {
         for profile: CodexProfile,
         codexAppURL: URL
     ) async -> ProfileRateLimits {
-        await fetchRateLimits(codexHomeURL: profile.codexHomePath, codexAppURL: codexAppURL)
+        await fetchRateLimits(
+            codexHomeURL: profile.codexHomePath,
+            codexAppURL: codexAppURL,
+            configProfile: profile.codexLaunchProfileSelection.configProfile
+        )
     }
 
     public func fetchRateLimits(
         codexHomeURL: URL,
         codexAppURL: URL
     ) async -> ProfileRateLimits {
+        await fetchRateLimits(
+            codexHomeURL: codexHomeURL,
+            codexAppURL: codexAppURL,
+            configProfile: nil
+        )
+    }
+
+    public func fetchRateLimits(
+        codexHomeURL: URL,
+        codexAppURL: URL,
+        configProfile: CodexConfigProfile?
+    ) async -> ProfileRateLimits {
         do {
             switch try CodexProviderConfiguration.resolve(
                 codexHomeURL: codexHomeURL,
-                fileManager: fileManager
+                fileManager: fileManager,
+                configProfile: configProfile
             ) {
             case .openAI:
                 return nativeClient.fetchRateLimits(
@@ -59,12 +76,21 @@ enum CodexProviderConfiguration: Equatable, Sendable {
 
     static func resolve(
         codexHomeURL: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        configProfile: CodexConfigProfile? = nil
     ) throws -> Self {
         let configURL = codexHomeURL.appendingPathComponent("config.toml")
-        guard fileManager.fileExists(atPath: configURL.path) else { return .openAI }
-        let content = try readBoundedConfig(at: configURL)
-        let document = NarrowTOMLDocument(content)
+        let content = fileManager.fileExists(atPath: configURL.path)
+            ? try readBoundedConfig(at: configURL)
+            : ""
+        var document = NarrowTOMLDocument(content)
+        if let configProfile {
+            try configProfile.validate(in: codexHomeURL)
+            document.overlay(NarrowTOMLDocument(try readBoundedConfig(
+                at: configProfile.configurationURL(in: codexHomeURL)
+            )))
+        }
+        guard !document.isEmpty else { return .openAI }
         let providerID = document.topLevelString("model_provider") ?? "openai"
         guard providerID != "openai" else { return .openAI }
         guard let baseURLString = document.string(
@@ -120,6 +146,13 @@ enum CodexProviderConfiguration: Equatable, Sendable {
     }
 }
 
+private extension CodexLaunchProfileSelection {
+    var configProfile: CodexConfigProfile? {
+        guard case let .named(profile) = self else { return nil }
+        return profile
+    }
+}
+
 struct CustomCodexProvider: Equatable, Sendable {
     var id: String
     var name: String
@@ -138,6 +171,8 @@ private enum CodexProviderConfigurationError: Error {
 
 private struct NarrowTOMLDocument {
     private var values: [[String]: [String: String]] = [:]
+
+    var isEmpty: Bool { values.isEmpty }
 
     init(_ content: String) {
         var table: [String] = []
@@ -162,6 +197,12 @@ private struct NarrowTOMLDocument {
             }
             guard let (key, value) = Self.assignment(stripped) else { continue }
             values[table, default: [:]][key] = value
+        }
+    }
+
+    mutating func overlay(_ other: Self) {
+        for (table, entries) in other.values {
+            values[table, default: [:]].merge(entries) { _, overlayValue in overlayValue }
         }
     }
 

@@ -49,20 +49,16 @@ final class AgentDockPreferencesTests: XCTestCase {
         )
     }
 
-    func testCodexProviderProfilesAndDefaultPersist() {
+    func testDefaultCodexConfigProfilePersistsAndCanReturnToBuiltIn() throws {
         let store = AgentDockPreferencesStore(defaults: defaults)
-        let provider = CodexProviderProfile(
-            name: "Bridge",
-            executableURL: URL(fileURLWithPath: "/opt/bridge/codex")
-        )
         var preferences = AgentDockPreferences.defaults
-        preferences.codexProviderProfiles = [provider]
-        preferences.defaultCodexProviderProfileID = provider.id
+        preferences.defaultCodexConfigProfile = try CodexConfigProfile(validating: "ollama")
 
         store.save(preferences)
+        XCTAssertEqual(store.load().defaultCodexConfigProfile?.name, "ollama")
 
-        XCTAssertEqual(store.load(), preferences)
-        store.restoreDefaults()
-        XCTAssertEqual(store.load(), .defaults)
+        preferences.defaultCodexConfigProfile = nil
+        store.save(preferences)
+        XCTAssertNil(store.load().defaultCodexConfigProfile)
     }
 }

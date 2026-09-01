@@ -62,12 +62,14 @@ Responses are time- and size-bounded. A failed custom-provider request fails
 closed instead of exposing the profile's unrelated OpenAI account quota.
 
 Codex launches preserve the ordinary parent environment, but AgentDock does
-not trust inherited profile-selection values. It always sets `CODEX_CLI_PATH`
-to the validated Codex app's bundled `Contents/Resources/codex` executable.
-Managed launches also set the selected profile's exact `CODEX_HOME`; stock
-launches remove `CODEX_HOME`. Custom model providers remain selected by the
-profile's Codex configuration and cannot replace the bundled executable
-through AgentDock's parent environment.
+not trust inherited profile-selection values. Built-in launches set
+`CODEX_CLI_PATH` to the validated Codex app's bundled
+`Contents/Resources/codex` executable. Named config-profile launches point it
+to AgentDock's signed proxy, which validates the profile-local bounded regular
+file and then executes that same bundled CLI with `--profile <name>`. Managed
+launches set the selected profile's exact `CODEX_HOME`; stock launches remove
+`CODEX_HOME`. User-selected executables cannot replace the bundled CLI through
+AgentDock's parent environment.
 
 ## Product Analytics
 
