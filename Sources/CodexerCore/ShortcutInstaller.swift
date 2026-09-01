@@ -111,7 +111,10 @@ public final class ShortcutInstaller: @unchecked Sendable {
 
     private func shortcutConfig(for profile: CodexProfile, codexAppURL: URL) throws -> Data {
         try PropertyListEncoder().encode(
-            IsolatedCodexLaunchConfiguration(profile: profile, codexAppURL: codexAppURL)
+            IsolatedCodexLaunchConfiguration(
+                profile: profile,
+                codexAppURL: codexAppURL
+            )
         )
     }
 

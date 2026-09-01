@@ -133,6 +133,13 @@ private struct ProfileOverview: View {
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .lineLimit(1)
+          if profile.product == .codex {
+            Text(profile.codexProviderProfile.map { "Provider profile: \($0.displayName)" }
+              ?? "Provider profile: Built-in Codex")
+              .font(.system(size: 11))
+              .foregroundStyle(.tertiary)
+              .lineLimit(1)
+          }
           HStack(spacing: 10) {
             StatusDot(isRunning: status.isRunning, size: 8)
             Text(status.isRunning ? "Running" : "Stopped")

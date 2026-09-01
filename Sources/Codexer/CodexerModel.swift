@@ -729,6 +729,7 @@ final class CodexerModel: ObservableObject {
         }
         errorMessage = nil
         let iconColor = color.hexString
+        let defaultProviderProfile = product == .codex ? defaultCodexProviderProfile : nil
         let worker = Task.detached(priority: .userInitiated) {
             try store.createProfile(
                 product: product,
@@ -736,6 +737,7 @@ final class CodexerModel: ObservableObject {
                 iconColor: iconColor,
                 iconKind: iconKind,
                 iconValue: iconValue,
+                codexProviderProfile: defaultProviderProfile,
                 customIconData: customIconData
             )
         }
@@ -1070,7 +1072,8 @@ final class CodexerModel: ObservableObject {
         color: Color,
         iconKind: ProfileIconKind,
         iconValue: String,
-        customIconData: Data?
+        customIconData: Data?,
+        codexProviderProfile: CodexProviderProfile?? = nil
     ) {
         guard beginStoreMutationIfAvailable() else { return }
         guard let store else {
@@ -1092,7 +1095,8 @@ final class CodexerModel: ObservableObject {
                         iconColor: color.hexString,
                         iconKind: iconKind,
                         iconValue: iconValue,
-                        customIconData: customIconData
+                        customIconData: customIconData,
+                        codexProviderProfile: codexProviderProfile
                     )
                     if hadShortcut {
                         try installer.installShortcut(for: result, codexAppURL: appURL)
@@ -1485,6 +1489,46 @@ final class CodexerModel: ObservableObject {
     func restorePreferences() {
         preferencesStore.restoreDefaults()
         preferences = .defaults
+    }
+
+    var defaultCodexProviderProfile: CodexProviderProfile? {
+        guard let id = preferences.defaultCodexProviderProfileID else { return nil }
+        return preferences.codexProviderProfiles.first { $0.id == id }
+    }
+
+    func addCodexProviderProfile(executableURL: URL) {
+        let profile = CodexProviderProfile(
+            name: executableURL.deletingPathExtension().lastPathComponent,
+            executableURL: executableURL.standardizedFileURL
+        )
+        do {
+            try profile.validate()
+            guard !preferences.codexProviderProfiles.contains(where: {
+                $0.executableURL.standardizedFileURL == profile.executableURL
+            }) else {
+                errorMessage = "That Codex provider executable is already configured."
+                return
+            }
+            preferences.codexProviderProfiles.append(profile)
+            preferences.defaultCodexProviderProfileID = profile.id
+            errorMessage = nil
+        } catch {
+            present(error, code: .invalidConfiguration, provider: .codex, action: .configured)
+        }
+    }
+
+    func removeCodexProviderProfile(_ providerProfile: CodexProviderProfile) {
+        preferences.codexProviderProfiles.removeAll { $0.id == providerProfile.id }
+        if preferences.defaultCodexProviderProfileID == providerProfile.id {
+            preferences.defaultCodexProviderProfileID = nil
+        }
+    }
+
+    func setDefaultCodexProviderProfile(_ id: CodexProviderProfile.ID?) {
+        guard id == nil || preferences.codexProviderProfiles.contains(where: { $0.id == id }) else {
+            return
+        }
+        preferences.defaultCodexProviderProfileID = id
     }
 
     func setAnalyticsConsent(granted: Bool, surface: AnalyticsSurface) {

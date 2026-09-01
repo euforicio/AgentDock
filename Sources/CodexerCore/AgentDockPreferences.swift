@@ -30,13 +30,17 @@ public struct AgentDockPreferences: Equatable, Sendable {
     public var refreshProfileActivity: Bool
     public var refreshIntervalMinutes: Int
     public var showStatusInProfileList: Bool
+    public var codexProviderProfiles: [CodexProviderProfile] = []
+    public var defaultCodexProviderProfileID: CodexProviderProfile.ID?
 
     public static let defaults = AgentDockPreferences(
         appearance: .system,
         defaultView: .lastOpened,
         refreshProfileActivity: true,
         refreshIntervalMinutes: 5,
-        showStatusInProfileList: true
+        showStatusInProfileList: true,
+        codexProviderProfiles: [],
+        defaultCodexProviderProfileID: nil
     )
 }
 
@@ -63,12 +67,22 @@ public struct AgentDockPreferencesStore {
         let showStatus = defaults.object(forKey: Key.showStatusInProfileList) == nil
             ? standard.showStatusInProfileList
             : defaults.bool(forKey: Key.showStatusInProfileList)
+        let providerProfiles = defaults.data(forKey: Key.codexProviderProfiles)
+            .flatMap { try? JSONDecoder().decode([CodexProviderProfile].self, from: $0) }
+            ?? standard.codexProviderProfiles
+        let defaultProviderProfileID = defaults.string(forKey: Key.defaultCodexProviderProfileID)
+            .flatMap(UUID.init(uuidString:))
+        let validatedDefaultID = providerProfiles.contains { $0.id == defaultProviderProfileID }
+            ? defaultProviderProfileID
+            : nil
         return AgentDockPreferences(
             appearance: appearance,
             defaultView: defaultView,
             refreshProfileActivity: refresh,
             refreshIntervalMinutes: interval,
-            showStatusInProfileList: showStatus
+            showStatusInProfileList: showStatus,
+            codexProviderProfiles: providerProfiles,
+            defaultCodexProviderProfileID: validatedDefaultID
         )
     }
 
@@ -83,6 +97,14 @@ public struct AgentDockPreferencesStore {
             forKey: Key.refreshIntervalMinutes
         )
         defaults.set(preferences.showStatusInProfileList, forKey: Key.showStatusInProfileList)
+        defaults.set(
+            try? JSONEncoder().encode(preferences.codexProviderProfiles),
+            forKey: Key.codexProviderProfiles
+        )
+        defaults.set(
+            preferences.defaultCodexProviderProfileID?.uuidString,
+            forKey: Key.defaultCodexProviderProfileID
+        )
     }
 
     public func restoreDefaults() {
@@ -91,7 +113,9 @@ public struct AgentDockPreferencesStore {
             Key.defaultView,
             Key.refreshProfileActivity,
             Key.refreshIntervalMinutes,
-            Key.showStatusInProfileList
+            Key.showStatusInProfileList,
+            Key.codexProviderProfiles,
+            Key.defaultCodexProviderProfileID
         ].forEach(defaults.removeObject(forKey:))
     }
 
@@ -103,5 +127,7 @@ public struct AgentDockPreferencesStore {
         static let refreshProfileActivity = "AgentDock.refreshProfileActivity"
         static let refreshIntervalMinutes = "AgentDock.refreshIntervalMinutes"
         static let showStatusInProfileList = "AgentDock.showStatusInProfileList"
+        static let codexProviderProfiles = "AgentDock.codexProviderProfiles"
+        static let defaultCodexProviderProfileID = "AgentDock.defaultCodexProviderProfileID"
     }
 }

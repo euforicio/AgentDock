@@ -75,8 +75,10 @@ release procedures.
 2. Select the provider and give the profile a descriptive name.
 3. Select the profile and choose **Open**.
 4. Sign in inside that managed provider window.
-5. Optionally choose **Install Shortcut** for a Dock-pinnable launcher.
-6. Repeat for another account or provider.
+5. For Codex, optionally edit the profile and choose a configured compatible
+   provider CLI; **Built-in Codex** is always available as the fallback.
+6. Optionally choose **Install Shortcut** for a Dock-pinnable launcher.
+7. Repeat for another account or provider.
 
 Drag managed profiles within their provider section to keep the sidebar in the
 order you prefer. The order persists across launches; official provider rows

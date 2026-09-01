@@ -48,4 +48,21 @@ final class AgentDockPreferencesTests: XCTestCase {
             AgentDockPreferences.defaults.refreshIntervalMinutes
         )
     }
+
+    func testCodexProviderProfilesAndDefaultPersist() {
+        let store = AgentDockPreferencesStore(defaults: defaults)
+        let provider = CodexProviderProfile(
+            name: "Bridge",
+            executableURL: URL(fileURLWithPath: "/opt/bridge/codex")
+        )
+        var preferences = AgentDockPreferences.defaults
+        preferences.codexProviderProfiles = [provider]
+        preferences.defaultCodexProviderProfileID = provider.id
+
+        store.save(preferences)
+
+        XCTAssertEqual(store.load(), preferences)
+        store.restoreDefaults()
+        XCTAssertEqual(store.load(), .defaults)
+    }
 }

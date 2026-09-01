@@ -13,6 +13,7 @@ public struct IsolatedCodexLaunchConfiguration: Codable, Equatable, Sendable {
     public var mcpOAuthCallbackPort: Int?
     public var profileID: UUID?
     public var profileSlug: String?
+    public var codexProviderProfile: CodexProviderProfile?
 
     public init(
         codexAppURL: URL,
@@ -20,7 +21,8 @@ public struct IsolatedCodexLaunchConfiguration: Codable, Equatable, Sendable {
         electronUserDataURL: URL,
         mcpOAuthCallbackPort: Int? = nil,
         profileID: UUID? = nil,
-        profileSlug: String? = nil
+        profileSlug: String? = nil,
+        codexProviderProfile: CodexProviderProfile? = nil
     ) {
         product = .codex
         codexAppPath = codexAppURL.path
@@ -30,9 +32,13 @@ public struct IsolatedCodexLaunchConfiguration: Codable, Equatable, Sendable {
         self.mcpOAuthCallbackPort = mcpOAuthCallbackPort
         self.profileID = profileID
         self.profileSlug = profileSlug
+        self.codexProviderProfile = codexProviderProfile
     }
 
-    public init(profile: CodexProfile, codexAppURL: URL) {
+    public init(
+        profile: CodexProfile,
+        codexAppURL: URL
+    ) {
         product = profile.product
         codexAppPath = codexAppURL.path
         codexHomePath = profile.product == .codex ? profile.codexHomePath.path : ""
@@ -41,6 +47,7 @@ public struct IsolatedCodexLaunchConfiguration: Codable, Equatable, Sendable {
         mcpOAuthCallbackPort = profile.product == .codex ? profile.mcpOAuthCallbackPort : nil
         profileID = profile.id
         profileSlug = profile.slug
+        codexProviderProfile = profile.product == .codex ? profile.codexProviderProfile : nil
     }
 
     public var resolvedProduct: DesktopProduct { product ?? .codex }
@@ -53,6 +60,9 @@ public struct IsolatedCodexLaunchConfiguration: Codable, Equatable, Sendable {
     }
     public var appExecutableURL: URL {
         Self.appExecutableURL(for: codexAppURL)
+    }
+    public var codexProviderExecutableURL: URL? {
+        codexProviderProfile?.executableURL
     }
 
     public static func appExecutableURL(for codexAppURL: URL) -> URL {
@@ -377,12 +387,14 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
     static func launchEnvironment(
         inheriting inheritedEnvironment: [String: String],
         codexAppURL: URL,
-        codexHomePath: String?
+        codexHomePath: String?,
+        providerExecutableURL: URL? = nil
     ) -> [String: String] {
         var environment = inheritedEnvironment
-        environment["CODEX_CLI_PATH"] = codexAppURL
-            .appendingPathComponent("Contents/Resources/codex", isDirectory: false)
-            .path
+        environment[CodexProviderLaunch.cliPathEnvironmentKey] = (
+            providerExecutableURL
+                ?? CodexProviderLaunch.builtInExecutableURL(codexAppURL: codexAppURL)
+        ).path
         if let codexHomePath {
             environment["CODEX_HOME"] = codexHomePath
         } else {
@@ -403,7 +415,8 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
         openConfiguration.environment = Self.launchEnvironment(
             inheriting: ProcessInfo.processInfo.environment,
             codexAppURL: configuration.codexAppURL,
-            codexHomePath: configuration.codexHomePath
+            codexHomePath: configuration.codexHomePath,
+            providerExecutableURL: configuration.codexProviderExecutableURL
         )
 
         let application = try await NSWorkspace.shared.openApplication(
@@ -940,6 +953,7 @@ public actor CodexInstanceController {
         ).isEmpty {
             _ = try await closeProcesses(configuration: configuration)
         }
+        try validateCodexProviderProfile(configuration)
         try validateMCPConfiguration(configuration)
         try validator.validateCodexApp(at: configuration.codexAppURL)
         let processID = try await workspaceLauncher.launch(configuration: configuration)
@@ -1256,6 +1270,19 @@ public actor CodexInstanceController {
         }
     }
 
+    private func validateCodexProviderProfile(
+        _ configuration: IsolatedCodexLaunchConfiguration
+    ) throws {
+        guard let providerProfile = configuration.codexProviderProfile else { return }
+        do {
+            try providerProfile.validate()
+        } catch {
+            throw CodexLauncherError.invalidCodexProviderProfile(
+                providerProfile.executableURL.path
+            )
+        }
+    }
+
     private func validateMCPConfiguration(
         _ configuration: IsolatedCodexLaunchConfiguration
     ) throws {
@@ -1284,6 +1311,7 @@ public enum CodexLauncherError: Error, LocalizedError, Equatable {
     case invalidCodexSignature(String)
     case invalidIsolationLayout(String)
     case invalidMCPConfiguration(String)
+    case invalidCodexProviderProfile(String)
     case processInspectionFailed(Int32)
     case processInspectionUnavailable
     case launchDidNotReturnProcess
@@ -1305,6 +1333,8 @@ public enum CodexLauncherError: Error, LocalizedError, Equatable {
             "The Codex profile at \(path) is missing or has an invalid isolation layout."
         case let .invalidMCPConfiguration(path):
             "The Codex profile has an invalid MCP OAuth configuration at \(path)."
+        case let .invalidCodexProviderProfile(path):
+            "The selected Codex provider profile is missing, unsafe, or not executable at \(path). Choose Built-in Codex or repair the profile."
         case let .processInspectionFailed(status):
             "AgentDock could not inspect running Codex instances (ps exited with status \(status))."
         case .processInspectionUnavailable:

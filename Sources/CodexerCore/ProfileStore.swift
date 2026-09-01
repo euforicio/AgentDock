@@ -173,6 +173,7 @@ public final class ProfileStore: @unchecked Sendable {
         iconColor: String = "#2563EB",
         iconKind: ProfileIconKind = .monogram,
         iconValue: String = "",
+        codexProviderProfile: CodexProviderProfile? = nil,
         customIconData: Data? = nil
     ) throws -> CodexProfile {
         try withStoreTransaction {
@@ -182,6 +183,7 @@ public final class ProfileStore: @unchecked Sendable {
                 iconColor: iconColor,
                 iconKind: iconKind,
                 iconValue: iconValue,
+                codexProviderProfile: codexProviderProfile,
                 customIconData: customIconData
             )
         }
@@ -194,10 +196,12 @@ public final class ProfileStore: @unchecked Sendable {
         iconColor: String,
         iconKind: ProfileIconKind,
         iconValue: String,
+        codexProviderProfile: CodexProviderProfile?,
         customIconData: Data?
     ) throws -> CodexProfile {
         try Task.checkCancellation()
         let cleanName = try validatedName(name)
+        try codexProviderProfile?.validate(fileManager: fileManager)
         let slug = uniqueSlug(from: cleanName, product: product)
         let callbackPort = product == .codex ? try allocateCallbackPort() : 0
         let profile = CodexProfile(
@@ -209,7 +213,8 @@ public final class ProfileStore: @unchecked Sendable {
             mcpOAuthCallbackPort: callbackPort,
             iconColor: iconColor,
             iconKind: iconKind,
-            iconValue: iconValue
+            iconValue: iconValue,
+            codexProviderProfile: product == .codex ? codexProviderProfile : nil
         )
 
         let previous = storedProfiles
@@ -458,7 +463,8 @@ public final class ProfileStore: @unchecked Sendable {
         iconColor: String?,
         iconKind: ProfileIconKind?,
         iconValue: String?,
-        customIconData: Data?
+        customIconData: Data?,
+        codexProviderProfile: CodexProviderProfile?? = nil
     ) throws -> CodexProfile {
         try withStoreTransaction {
             try updateProfileUnlocked(
@@ -467,7 +473,8 @@ public final class ProfileStore: @unchecked Sendable {
                 iconColor: iconColor,
                 iconKind: iconKind,
                 iconValue: iconValue,
-                customIconData: customIconData
+                customIconData: customIconData,
+                codexProviderProfile: codexProviderProfile
             )
         }
     }
@@ -479,7 +486,8 @@ public final class ProfileStore: @unchecked Sendable {
         iconColor: String?,
         iconKind: ProfileIconKind?,
         iconValue: String?,
-        customIconData: Data?
+        customIconData: Data?,
+        codexProviderProfile: CodexProviderProfile??
     ) throws -> CodexProfile {
         let cleanName = try validatedName(name)
         guard let index = storedProfiles.firstIndex(where: { $0.id == id }) else {
@@ -495,6 +503,12 @@ public final class ProfileStore: @unchecked Sendable {
         }
         if let iconValue {
             storedProfiles[index].iconValue = iconValue
+        }
+        if let codexProviderProfile {
+            try codexProviderProfile?.validate(fileManager: fileManager)
+            storedProfiles[index].codexProviderProfile = storedProfiles[index].product == .codex
+                ? codexProviderProfile
+                : nil
         }
 
         let iconURL = storedProfiles[index].customIconPath
