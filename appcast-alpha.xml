@@ -6,15 +6,15 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>AgentDock</title>
         <item>
-            <title>0.1.22-alpha.51</title>
-            <pubDate>Tue, 01 Sep 2026 05:50:49 +0000</pubDate>
+            <title>0.1.22-alpha.52</title>
+            <pubDate>Tue, 01 Sep 2026 06:54:03 +0000</pubDate>
             <link>https://github.com/euforicio/AgentDock</link>
             <sparkle:channel>alpha</sparkle:channel>
-            <sparkle:version>1000051</sparkle:version>
-            <sparkle:shortVersionString>0.1.22-alpha.51</sparkle:shortVersionString>
+            <sparkle:version>1000052</sparkle:version>
+            <sparkle:shortVersionString>0.1.22-alpha.52</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/euforicio/AgentDock/releases/download/alpha-20260901054651-859cb28f418a/AgentDock-0.1.22-alpha.51.zip" length="7450899" type="application/octet-stream" sparkle:edSignature="DmC5kBWWw9G4RZDumCwnvxL5EmzFP8apOPU7dXRfRTgy7QdIXzeow05Qmy7jxyoC4nn+gah+PoTZFhQKPOpdBQ=="/>
+            <enclosure url="https://github.com/euforicio/AgentDock/releases/download/alpha-20260901065035-b73609f92c0b/AgentDock-0.1.22-alpha.52.zip" length="7459946" type="application/octet-stream" sparkle:edSignature="DfiCtXHuE/9TrW+7yS7FEIIgNvI5CirYJ6kpBT0dKbS43X9wmeEmeD+ELJXwixOdY6voc6mywqkzDgoGBDqNAQ=="/>
         </item>
         <item>
             <title>0.1.21</title>
@@ -49,6 +49,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: XvaxWyHu0lNuBujutkDS5lovsvqxvNrt9ySrzMFS4hOgP/0926M3CYfqkwSgwQcuBdO8bgNTXyA//f2b7N6HDw==
+edSignature: Yu6XIeCQNYv2hlpkSib/OAUDfepykZbYLZ7WnPsa+TJse7Wp/ltmnRfpqwNAWQrJpUwdEdGOnATCnp97mCWBCA==
 length: 3561
 -->
