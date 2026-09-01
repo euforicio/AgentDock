@@ -297,7 +297,9 @@ private struct CompactCodexProviderProfileCard: View {
 
         Picker("Provider Profile", selection: selectionBinding) {
           Text(defaultLabel).tag(CodexLaunchProfileSelection.useDefault)
-          Text("Built-in Codex (OAuth)").tag(CodexLaunchProfileSelection.builtIn)
+          if defaultProfile != nil {
+            Text("Built-in Codex (OAuth)").tag(CodexLaunchProfileSelection.builtIn)
+          }
           ForEach(profilesIncludingSelection) { configProfile in
             Text(configProfile.displayName).tag(CodexLaunchProfileSelection.named(configProfile))
           }
@@ -339,11 +341,20 @@ private struct CompactCodexProviderProfileCard: View {
   }
 
   private var selectionBinding: Binding<CodexLaunchProfileSelection> {
-    Binding(get: { selection }, set: { onSelect($0) })
+    Binding(
+      get: {
+        defaultProfile == nil && selection == .builtIn ? .useDefault : selection
+      },
+      set: { onSelect($0) }
+    )
   }
 
   private var defaultLabel: String {
-    "Use Default (\(defaultProfile?.displayName ?? "Built-in Codex"))"
+    if let defaultProfile {
+      "Default — \(defaultProfile.displayName)"
+    } else {
+      "Built-in Codex (OAuth) — Default"
+    }
   }
 
   private var profilesIncludingSelection: [CodexConfigProfile] {
