@@ -257,6 +257,63 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.electronUserDataPath.path))
     }
 
+    func testOpenRejectsMissingCodexProviderExecutableBeforeLaunch() async throws {
+        var profile = makeProfile(slug: "missing-provider-profile")
+        let missingExecutable = profile.profileDirectory.appendingPathComponent("missing-cli")
+        profile.codexProviderProfile = CodexProviderProfile(
+            name: "Missing",
+            executableURL: missingExecutable
+        )
+        try prepareIsolationLayout(for: profile)
+        let launcher = RecordingWorkspaceLauncher(processID: 741)
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
+            workspaceLauncher: launcher,
+            lifecycleController: RecordingLifecycleController(running: [741])
+        )
+
+        do {
+            _ = try await controller.open(
+                profile: profile,
+                codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app")
+            )
+            XCTFail("Expected the missing provider executable to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? CodexLauncherError,
+                .invalidCodexProviderProfile(missingExecutable.path)
+            )
+        }
+        let launchedConfigurations = await launcher.configurations()
+        XCTAssertTrue(launchedConfigurations.isEmpty)
+    }
+
+    func testOpenFocusesExistingInstanceEvenWhenProviderExecutableWasRemoved() async throws {
+        var profile = makeProfile(slug: "removed-provider-profile")
+        profile.codexProviderProfile = CodexProviderProfile(
+            name: "Removed",
+            executableURL: profile.profileDirectory.appendingPathComponent("removed-cli")
+        )
+        try prepareIsolationLayout(for: profile)
+        let configuration = configuration(for: profile)
+        let snapshot = "202 \(configuration.appExecutableURL.path) --user-data-dir=\(configuration.electronUserDataPath)"
+        let lifecycle = RecordingLifecycleController(running: [202])
+        let launcher = RecordingWorkspaceLauncher(processID: 741)
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: snapshot),
+            workspaceLauncher: launcher,
+            lifecycleController: lifecycle
+        )
+
+        let outcome = try await controller.open(configuration: configuration)
+
+        XCTAssertEqual(outcome, .focused(processID: 202))
+        let launchedConfigurations = await launcher.configurations()
+        XCTAssertTrue(launchedConfigurations.isEmpty)
+    }
+
     func testOpenTerminatesVerifiedOrphanedHelperBeforeLaunchingReplacement() async throws {
         let profile = makeProfile(slug: "orphan-recovery")
         try prepareIsolationLayout(for: profile)

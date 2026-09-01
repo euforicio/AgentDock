@@ -58,6 +58,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
     public var iconColor: String
     public var iconKind: ProfileIconKind
     public var iconValue: String
+    public var codexProviderProfile: CodexProviderProfile?
     public var createdAt: Date
     public var lastLaunchedAt: Date?
 
@@ -99,6 +100,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         iconColor: String = "#2563EB",
         iconKind: ProfileIconKind = .monogram,
         iconValue: String = "",
+        codexProviderProfile: CodexProviderProfile? = nil,
         createdAt: Date = Date(),
         lastLaunchedAt: Date? = nil
     ) {
@@ -128,6 +130,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
             iconColor: iconColor,
             iconKind: iconKind,
             iconValue: iconValue,
+            codexProviderProfile: codexProviderProfile,
             createdAt: createdAt,
             lastLaunchedAt: lastLaunchedAt
         )
@@ -144,6 +147,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         iconColor: String = "#2563EB",
         iconKind: ProfileIconKind = .monogram,
         iconValue: String = "",
+        codexProviderProfile: CodexProviderProfile? = nil,
         createdAt: Date = Date(),
         lastLaunchedAt: Date? = nil
     ) {
@@ -158,6 +162,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         self.iconColor = iconColor
         self.iconKind = iconKind
         self.iconValue = iconValue
+        self.codexProviderProfile = product == .codex ? codexProviderProfile : nil
         self.createdAt = createdAt
         self.lastLaunchedAt = lastLaunchedAt
     }
@@ -177,6 +182,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         case iconColor
         case iconKind
         case iconValue
+        case codexProviderProfile
         case createdAt
         case lastLaunchedAt
     }
@@ -190,6 +196,9 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         iconColor = try container.decode(String.self, forKey: .iconColor)
         iconKind = try container.decodeIfPresent(ProfileIconKind.self, forKey: .iconKind) ?? .monogram
         iconValue = try container.decodeIfPresent(String.self, forKey: .iconValue) ?? ""
+        codexProviderProfile = product == .codex
+            ? try container.decodeIfPresent(CodexProviderProfile.self, forKey: .codexProviderProfile)
+            : nil
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         lastLaunchedAt = try container.decodeIfPresent(Date.self, forKey: .lastLaunchedAt)
         mcpOAuthCallbackPort = product == .codex
@@ -227,6 +236,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         try container.encode(iconColor, forKey: .iconColor)
         try container.encode(iconKind, forKey: .iconKind)
         try container.encode(iconValue, forKey: .iconValue)
+        try container.encodeIfPresent(codexProviderProfile, forKey: .codexProviderProfile)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(lastLaunchedAt, forKey: .lastLaunchedAt)
     }

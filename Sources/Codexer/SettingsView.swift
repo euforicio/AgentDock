@@ -214,6 +214,46 @@ struct SettingsView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .padding(.top, 12)
+
+            SettingsSectionHeader("Codex Provider Profiles")
+            SettingsRow("Default for new Codex profiles") {
+                Picker("Default Codex Provider Profile", selection: defaultCodexProviderBinding) {
+                    Text("Built-in Codex").tag(CodexProviderProfile.ID?.none)
+                    ForEach(model.preferences.codexProviderProfiles) { providerProfile in
+                        Text(providerProfile.displayName).tag(Optional(providerProfile.id))
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 220)
+            }
+            ForEach(model.preferences.codexProviderProfiles) { providerProfile in
+                SettingsRow(providerProfile.displayName, height: 58) {
+                    HStack(spacing: 10) {
+                        Text(providerProfile.executableURL.path)
+                            .font(.system(size: 11).monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(width: 260, alignment: .trailing)
+                        Button(role: .destructive) {
+                            model.removeCodexProviderProfile(providerProfile)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove provider profile")
+                    }
+                }
+            }
+            SettingsRow("Compatible Codex CLI") {
+                Button("Add Provider Profile…", action: chooseCodexProviderExecutable)
+                    .buttonStyle(.bordered)
+            }
+            Text("Provider profiles select a Codex-compatible CLI through CODEX_CLI_PATH. Existing managed profiles keep their saved choice; Built-in Codex always pins the CLI bundled with the selected Codex app.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
         }
     }
 
@@ -375,6 +415,24 @@ struct SettingsView: View {
                 [.action(.statusVisibilityChanged), .surface(.settingsGeneral), .enabled($0)]
             ))
         })
+    }
+
+    private var defaultCodexProviderBinding: Binding<CodexProviderProfile.ID?> {
+        Binding(
+            get: { model.preferences.defaultCodexProviderProfileID },
+            set: { model.setDefaultCodexProviderProfile($0) }
+        )
+    }
+
+    private func chooseCodexProviderExecutable() {
+        let panel = NSOpenPanel()
+        panel.title = "Select a Codex-Compatible Provider Executable"
+        panel.prompt = "Add Provider"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.addCodexProviderProfile(executableURL: url)
     }
 
     private var automaticChecksBinding: Binding<Bool> {

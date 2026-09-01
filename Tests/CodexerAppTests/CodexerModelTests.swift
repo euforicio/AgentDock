@@ -170,6 +170,32 @@ final class CodexerModelTests: XCTestCase {
         XCTAssertFalse(model.storeMutationInProgress)
     }
 
+    func testCodexProviderDefaultAppliesToNewProfilesAndCanReturnToBuiltIn() async throws {
+        let store = try makeStore()
+        let executable = root.appendingPathComponent("provider-codex")
+        XCTAssertTrue(FileManager.default.createFile(atPath: executable.path, contents: Data()))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let provider = CodexProviderProfile(name: "Provider Codex", executableURL: executable)
+        let suiteName = "CodexerModelTests.ProviderPreferences.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suiteName) }
+        let preferencesStore = AgentDockPreferencesStore(defaults: defaults)
+        var preferences = AgentDockPreferences.defaults
+        preferences.codexProviderProfiles = [provider]
+        preferences.defaultCodexProviderProfileID = provider.id
+        preferencesStore.save(preferences)
+        let model = makeModel(store: store, preferencesStore: preferencesStore)
+
+        let providerCreated = await model.addProfile(name: "Provider", color: .blue)
+        XCTAssertTrue(providerCreated)
+        XCTAssertEqual(store.profiles.first?.codexProviderProfile, provider)
+
+        model.setDefaultCodexProviderProfile(nil)
+        let builtInCreated = await model.addProfile(name: "Built In", color: .green)
+        XCTAssertTrue(builtInCreated)
+        XCTAssertNil(store.profiles.last?.codexProviderProfile)
+    }
+
     func testRapidSecondCreateIsRejectedWhileFirstWaitsWithoutBlockingMainActor() async throws {
         let store = try ProfileStore(
             rootDirectory: root,
@@ -688,7 +714,8 @@ final class CodexerModelTests: XCTestCase {
         store: ProfileStore,
         claudeAppURL: URL = DesktopAppRegistry.claude.defaultAppURL,
         manager: any DesktopInstanceManaging = RecordingInstanceManager(),
-        scanner: any ProfileStatsScanning = FixedStatsScanner()
+        scanner: any ProfileStatsScanning = FixedStatsScanner(),
+        preferencesStore: AgentDockPreferencesStore = AgentDockPreferencesStore()
     ) -> CodexerModel {
         CodexerModel(
             store: store,
@@ -697,7 +724,8 @@ final class CodexerModelTests: XCTestCase {
             instanceController: manager,
             shortcutInstaller: NoopShortcutManager(),
             statsScanner: scanner,
-            rateLimitClient: FixedRateLimitClient()
+            rateLimitClient: FixedRateLimitClient(),
+            preferencesStore: preferencesStore
         )
     }
 

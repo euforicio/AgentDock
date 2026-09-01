@@ -89,8 +89,10 @@ managed data are not migrated or replaced.
 ## Isolation Model
 
 Managed Codex profiles receive separate `CODEX_HOME` and Electron user-data
-directories. Managed Claude profiles receive separate `UserData` roots through
-the verified `CLAUDE_USER_DATA_DIR` launch contract.
+directories. A profile can select one validated Codex-compatible provider
+executable as its launch default through `CODEX_CLI_PATH`; Built-in Codex pins
+the CLI bundled with the selected app. Managed Claude profiles receive separate `UserData` roots
+through the verified `CLAUDE_USER_DATA_DIR` launch contract.
 
 Isolation covers supported provider configuration, authentication state, local
 browser state, and profile data. It does not change `HOME` and is not a macOS

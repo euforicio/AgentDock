@@ -14,7 +14,16 @@ final class ShortcutInstallerTests: XCTestCase {
     }
 
     func testInstallShortcutCreatesBundleWithNativeHelperConfigAndInfoPlist() throws {
-        let profile = CodexProfile(name: "Work Account", slug: "work-account", rootDirectory: root)
+        let providerExecutable = try makeHelper()
+        let profile = CodexProfile(
+            name: "Work Account",
+            slug: "work-account",
+            rootDirectory: root,
+            codexProviderProfile: CodexProviderProfile(
+                name: "Bridge",
+                executableURL: providerExecutable
+            )
+        )
         let codexApp = URL(fileURLWithPath: "/Applications/Codex.app")
         let helper = try makeHelper()
         let installer = ShortcutInstaller(
@@ -44,6 +53,8 @@ final class ShortcutInstallerTests: XCTestCase {
         XCTAssertEqual(config.electronUserDataPath, profile.electronUserDataPath.path)
         XCTAssertEqual(config.profileID, profile.id)
         XCTAssertEqual(config.profileSlug, profile.slug)
+        XCTAssertEqual(config.codexProviderProfile?.displayName, "Bridge")
+        XCTAssertEqual(config.codexProviderExecutableURL, providerExecutable)
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "AgentDockShortcutLauncher")
         XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "26.0")
         XCTAssertEqual(

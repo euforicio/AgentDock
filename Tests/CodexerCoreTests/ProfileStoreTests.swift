@@ -221,6 +221,43 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.profiles.first?.iconValue, "briefcase")
     }
 
+    func testUpdateProfilePersistsAndClearsCodexProviderProfile() throws {
+        let profile = try store.createProfile(name: "Work")
+        let executable = root.appendingPathComponent("bridge-cli")
+        XCTAssertTrue(FileManager.default.createFile(atPath: executable.path, contents: Data()))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let providerProfile = CodexProviderProfile(name: "Bridge", executableURL: executable)
+
+        let selected = try store.updateProfile(
+            id: profile.id,
+            name: profile.name,
+            iconColor: nil,
+            iconKind: nil,
+            iconValue: nil,
+            customIconData: nil,
+            codexProviderProfile: .some(providerProfile)
+        )
+        XCTAssertEqual(selected.codexProviderProfile, providerProfile)
+
+        let reloaded = try ProfileStore(
+            rootDirectory: root,
+            shortcutDirectory: shortcutRoot,
+            usageChecker: NeverInUseChecker()
+        )
+        XCTAssertEqual(reloaded.profiles.first?.codexProviderProfile, providerProfile)
+
+        let cleared = try reloaded.updateProfile(
+            id: profile.id,
+            name: profile.name,
+            iconColor: nil,
+            iconKind: nil,
+            iconValue: nil,
+            customIconData: nil,
+            codexProviderProfile: .some(nil)
+        )
+        XCTAssertNil(cleared.codexProviderProfile)
+    }
+
     func testInvalidCustomImageIsRejectedWithoutCreatingProfile() {
         XCTAssertThrowsError(try store.createProfile(
             name: "Unsafe",

@@ -10,9 +10,12 @@
    identity.
 4. Before a new Codex launch, AgentDock closes any provider-signed orphan helper
    whose live executable remains contained by that profile's `CODEX_HOME`.
-5. AgentDock starts a new provider instance with the profile-specific local
+5. When the profile selects a custom Codex provider profile, AgentDock validates
+   its user-selected executable and passes it through `CODEX_CLI_PATH`. The
+   Built-in Codex choice pins the CLI bundled with the selected Codex app.
+6. AgentDock starts a new provider instance with the profile-specific local
    state contract.
-6. Post-launch discovery verifies the returned process before the UI marks the
+7. Post-launch discovery verifies the returned process before the UI marks the
    profile as running.
 
 Failed persistence or validation rolls back partial state where safe. A
