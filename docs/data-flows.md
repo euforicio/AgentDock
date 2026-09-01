@@ -10,9 +10,10 @@
    identity.
 4. Before a new Codex launch, AgentDock closes any provider-signed orphan helper
    whose live executable remains contained by that profile's `CODEX_HOME`.
-5. AgentDock resolves the persisted Codex launch selection to the app default,
-   Built-in Codex, or a safe profile-local `<name>.config.toml`. Named profiles
-   are passed to the bundled CLI through `--profile <name>`.
+5. AgentDock resolves the persisted Codex launch selection to that managed
+   profile's own default, Built-in Codex, or a safe profile-local
+   `<name>.config.toml`. Named profiles are translated into bounded `--config`
+   overrides accepted by the desktop app-server command.
 6. AgentDock starts a new provider instance with the profile-specific local
    state contract.
 7. Post-launch discovery verifies the returned process before the UI marks the

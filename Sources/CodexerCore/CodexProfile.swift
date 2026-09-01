@@ -59,6 +59,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
     public var iconKind: ProfileIconKind
     public var iconValue: String
     public var codexLaunchProfileSelection: CodexLaunchProfileSelection
+    public var codexDefaultConfigProfile: CodexConfigProfile?
     public var createdAt: Date
     public var lastLaunchedAt: Date?
 
@@ -101,6 +102,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         iconKind: ProfileIconKind = .monogram,
         iconValue: String = "",
         codexLaunchProfileSelection: CodexLaunchProfileSelection = .useDefault,
+        codexDefaultConfigProfile: CodexConfigProfile? = nil,
         createdAt: Date = Date(),
         lastLaunchedAt: Date? = nil
     ) {
@@ -131,6 +133,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
             iconKind: iconKind,
             iconValue: iconValue,
             codexLaunchProfileSelection: codexLaunchProfileSelection,
+            codexDefaultConfigProfile: codexDefaultConfigProfile,
             createdAt: createdAt,
             lastLaunchedAt: lastLaunchedAt
         )
@@ -148,6 +151,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         iconKind: ProfileIconKind = .monogram,
         iconValue: String = "",
         codexLaunchProfileSelection: CodexLaunchProfileSelection = .useDefault,
+        codexDefaultConfigProfile: CodexConfigProfile? = nil,
         createdAt: Date = Date(),
         lastLaunchedAt: Date? = nil
     ) {
@@ -165,6 +169,9 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         self.codexLaunchProfileSelection = product == .codex
             ? codexLaunchProfileSelection
             : .builtIn
+        self.codexDefaultConfigProfile = product == .codex
+            ? codexDefaultConfigProfile
+            : nil
         self.createdAt = createdAt
         self.lastLaunchedAt = lastLaunchedAt
     }
@@ -185,6 +192,7 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         case iconKind
         case iconValue
         case codexLaunchProfileSelection
+        case codexDefaultConfigProfile
         case createdAt
         case lastLaunchedAt
     }
@@ -204,6 +212,12 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
                 forKey: .codexLaunchProfileSelection
             ) ?? .useDefault)
             : .builtIn
+        codexDefaultConfigProfile = product == .codex
+            ? try container.decodeIfPresent(
+                CodexConfigProfile.self,
+                forKey: .codexDefaultConfigProfile
+            )
+            : nil
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         lastLaunchedAt = try container.decodeIfPresent(Date.self, forKey: .lastLaunchedAt)
         mcpOAuthCallbackPort = product == .codex
@@ -243,6 +257,10 @@ public struct CodexProfile: Codable, Identifiable, Hashable, Sendable {
         try container.encode(iconValue, forKey: .iconValue)
         if product == .codex {
             try container.encode(codexLaunchProfileSelection, forKey: .codexLaunchProfileSelection)
+            try container.encodeIfPresent(
+                codexDefaultConfigProfile,
+                forKey: .codexDefaultConfigProfile
+            )
         }
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(lastLaunchedAt, forKey: .lastLaunchedAt)

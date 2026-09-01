@@ -49,16 +49,12 @@ final class AgentDockPreferencesTests: XCTestCase {
         )
     }
 
-    func testDefaultCodexConfigProfilePersistsAndCanReturnToBuiltIn() throws {
+    func testLegacyAppDefaultCanBeMigratedAndCleared() throws {
+        defaults.set("cursor-bridge", forKey: "AgentDock.defaultCodexConfigProfile")
         let store = AgentDockPreferencesStore(defaults: defaults)
-        var preferences = AgentDockPreferences.defaults
-        preferences.defaultCodexConfigProfile = try CodexConfigProfile(validating: "ollama")
 
-        store.save(preferences)
-        XCTAssertEqual(store.load().defaultCodexConfigProfile?.name, "ollama")
-
-        preferences.defaultCodexConfigProfile = nil
-        store.save(preferences)
-        XCTAssertNil(store.load().defaultCodexConfigProfile)
+        XCTAssertEqual(store.legacyDefaultCodexConfigProfile()?.name, "cursor-bridge")
+        store.clearLegacyDefaultCodexConfigProfile()
+        XCTAssertNil(store.legacyDefaultCodexConfigProfile())
     }
 }

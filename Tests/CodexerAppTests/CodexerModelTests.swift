@@ -230,7 +230,9 @@ final class CodexerModelTests: XCTestCase {
         await waitUntil { !model.storeMutationInProgress }
         XCTAssertEqual(store.profiles.first?.codexLaunchProfileSelection, .named(ollama))
 
-        model.setDefaultCodexConfigProfile(ollama)
+        model.setDefaultCodexConfigProfile(ollama, for: try XCTUnwrap(store.profiles.first))
+        await waitUntil { !model.storeMutationInProgress }
+        XCTAssertEqual(store.profiles.first?.codexDefaultConfigProfile, ollama)
         let selected = try XCTUnwrap(store.profiles.first)
         model.setCodexLaunchProfileSelection(.useDefault, for: selected)
         await waitUntil { !model.storeMutationInProgress }

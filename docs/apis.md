@@ -24,15 +24,17 @@ Codex profiles use:
 ```text
 CODEX_HOME=<profile>/CODEX_HOME
 --user-data-dir=<profile>/ElectronUserData
-[optional] --profile <name>
+[generated] --config <dotted-key=toml-value> ... app-server
 ```
 
 Named profiles are discovered from `<profile>/CODEX_HOME/<name>.config.toml`.
-AgentDock stores whether each managed profile uses the app default, forces the
-built-in configuration, or selects one named profile. The launch helper layers
-the named file through Codex's supported `--profile` argument while keeping
+AgentDock stores whether each managed profile uses its own default, forces the
+built-in configuration, or selects one named profile. The launch helper reads
+only that managed profile's selected file and translates its bounded TOML
+assignments into app-server-supported `--config` overrides while keeping
 `CODEX_CLI_PATH` pinned to AgentDock's bundled proxy and, ultimately, the CLI
-bundled inside the validated Codex app.
+bundled inside the validated Codex app. Codex's `--profile` flag is not used
+because the desktop app-server command rejects it.
 
 Claude profiles use:
 

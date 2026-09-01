@@ -556,6 +556,30 @@ public final class ProfileStore: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    public func setCodexDefaultConfigProfile(
+        id: UUID,
+        configProfile: CodexConfigProfile?
+    ) throws -> CodexProfile {
+        try withStoreTransaction {
+            guard let index = storedProfiles.firstIndex(where: { $0.id == id }) else {
+                throw ProfileStoreError.profileNotFound
+            }
+            guard storedProfiles[index].product == .codex else {
+                return storedProfiles[index]
+            }
+            let previous = storedProfiles[index].codexDefaultConfigProfile
+            storedProfiles[index].codexDefaultConfigProfile = configProfile
+            do {
+                try saveUnlocked()
+            } catch {
+                storedProfiles[index].codexDefaultConfigProfile = previous
+                throw error
+            }
+            return storedProfiles[index]
+        }
+    }
+
     public func reorderProfiles(
         product: DesktopProduct,
         orderedIDs: [CodexProfile.ID]

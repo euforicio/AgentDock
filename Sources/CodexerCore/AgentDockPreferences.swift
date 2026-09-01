@@ -30,15 +30,13 @@ public struct AgentDockPreferences: Equatable, Sendable {
     public var refreshProfileActivity: Bool
     public var refreshIntervalMinutes: Int
     public var showStatusInProfileList: Bool
-    public var defaultCodexConfigProfile: CodexConfigProfile? = nil
 
     public static let defaults = AgentDockPreferences(
         appearance: .system,
         defaultView: .lastOpened,
         refreshProfileActivity: true,
         refreshIntervalMinutes: 5,
-        showStatusInProfileList: true,
-        defaultCodexConfigProfile: nil
+        showStatusInProfileList: true
     )
 }
 
@@ -65,15 +63,12 @@ public struct AgentDockPreferencesStore {
         let showStatus = defaults.object(forKey: Key.showStatusInProfileList) == nil
             ? standard.showStatusInProfileList
             : defaults.bool(forKey: Key.showStatusInProfileList)
-        let defaultCodexConfigProfile = defaults.string(forKey: Key.defaultCodexConfigProfile)
-            .flatMap { try? CodexConfigProfile(validating: $0) }
         return AgentDockPreferences(
             appearance: appearance,
             defaultView: defaultView,
             refreshProfileActivity: refresh,
             refreshIntervalMinutes: interval,
-            showStatusInProfileList: showStatus,
-            defaultCodexConfigProfile: defaultCodexConfigProfile
+            showStatusInProfileList: showStatus
         )
     }
 
@@ -88,10 +83,6 @@ public struct AgentDockPreferencesStore {
             forKey: Key.refreshIntervalMinutes
         )
         defaults.set(preferences.showStatusInProfileList, forKey: Key.showStatusInProfileList)
-        defaults.set(
-            preferences.defaultCodexConfigProfile?.name,
-            forKey: Key.defaultCodexConfigProfile
-        )
     }
 
     public func restoreDefaults() {
@@ -101,8 +92,17 @@ public struct AgentDockPreferencesStore {
             Key.refreshProfileActivity,
             Key.refreshIntervalMinutes,
             Key.showStatusInProfileList,
-            Key.defaultCodexConfigProfile
+            Key.legacyDefaultCodexConfigProfile
         ].forEach(defaults.removeObject(forKey:))
+    }
+
+    public func legacyDefaultCodexConfigProfile() -> CodexConfigProfile? {
+        defaults.string(forKey: Key.legacyDefaultCodexConfigProfile)
+            .flatMap { try? CodexConfigProfile(validating: $0) }
+    }
+
+    public func clearLegacyDefaultCodexConfigProfile() {
+        defaults.removeObject(forKey: Key.legacyDefaultCodexConfigProfile)
     }
 
     public static let allowedIntervals = [1, 5, 15, 30, 60]
@@ -113,6 +113,6 @@ public struct AgentDockPreferencesStore {
         static let refreshProfileActivity = "AgentDock.refreshProfileActivity"
         static let refreshIntervalMinutes = "AgentDock.refreshIntervalMinutes"
         static let showStatusInProfileList = "AgentDock.showStatusInProfileList"
-        static let defaultCodexConfigProfile = "AgentDock.defaultCodexConfigProfile"
+        static let legacyDefaultCodexConfigProfile = "AgentDock.defaultCodexConfigProfile"
     }
 }

@@ -28,7 +28,7 @@ public enum CodexCLIProfileProxy {
         guard let codexHomeURL else {
             throw CodexCLIProfileProxyError.invalidEnvironment
         }
-        try profile.validate(in: codexHomeURL)
+        let configOverrides = try profile.appServerConfigOverrides(in: codexHomeURL)
 
         let executableURL = appURL
             .appendingPathComponent("Contents/Resources/codex", isDirectory: false)
@@ -40,10 +40,13 @@ public enum CodexCLIProfileProxy {
         unsetenv(enabledEnvironmentKey)
         unsetenv(appPathEnvironmentKey)
         unsetenv(profileEnvironmentKey)
+        guard FileManager.default.changeCurrentDirectoryPath(codexHomeURL.path) else {
+            throw CodexCLIProfileProxyError.invalidEnvironment
+        }
 
         let arguments = forwardedArguments(
             executableURL: executableURL,
-            profile: profile,
+            configOverrides: configOverrides,
             incomingArguments: Array(CommandLine.arguments.dropFirst())
         )
         let result = arguments.withCStringArray { argumentPointers in
@@ -68,10 +71,12 @@ public enum CodexCLIProfileProxy {
 
     static func forwardedArguments(
         executableURL: URL,
-        profile: CodexConfigProfile,
+        configOverrides: [String],
         incomingArguments: [String]
     ) -> [String] {
-        [executableURL.path, "--profile", profile.name] + incomingArguments
+        [executableURL.path]
+            + configOverrides.flatMap { ["--config", $0] }
+            + incomingArguments
     }
 }
 

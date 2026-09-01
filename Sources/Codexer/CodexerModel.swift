@@ -132,12 +132,27 @@ final class CodexerModel: ObservableObject {
             [.action(.launched), .trigger(.user)]
         ))
 
+        let legacyDefaultConfigProfile = preferencesStore.legacyDefaultCodexConfigProfile()
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 Result {
                     let selection = Self.validatedAppSelections(storedPaths: storedPaths)
+                    let store = try ProfileStore(codexAppURL: selection.urls[.codex])
+                    if let legacyDefaultConfigProfile {
+                        for profile in store.profiles where
+                            profile.product == .codex
+                                && profile.codexDefaultConfigProfile == nil
+                                && profile.codexLaunchProfileSelection
+                                    == .named(legacyDefaultConfigProfile)
+                        {
+                            try store.setCodexDefaultConfigProfile(
+                                id: profile.id,
+                                configProfile: legacyDefaultConfigProfile
+                            )
+                        }
+                    }
                     return (
-                        try ProfileStore(codexAppURL: selection.urls[.codex]),
+                        store,
                         selection
                     )
                 }
@@ -145,6 +160,9 @@ final class CodexerModel: ObservableObject {
             guard let self else { return }
             switch result {
             case let .success((store, selection)):
+                if legacyDefaultConfigProfile != nil {
+                    preferencesStore.clearLegacyDefaultCodexConfigProfile()
+                }
                 self.store = store
                 self.appURLs = selection.urls
                 self.errorMessage = selection.errorMessages.first
@@ -1084,7 +1102,6 @@ final class CodexerModel: ObservableObject {
         let hadShortcut = shortcutExists(for: profile)
         let installer = shortcutInstaller
         let appURL = appURL(for: profile.product)
-        let defaultCodexConfigProfile = preferences.defaultCodexConfigProfile
         Task { [weak self] in
             guard let self else { return }
             defer { storeMutationInProgress = false }
@@ -1101,10 +1118,8 @@ final class CodexerModel: ObservableObject {
                     if hadShortcut {
                         var shortcutProfile = result
                         if shortcutProfile.product == .codex {
-                            shortcutProfile.codexLaunchProfileSelection = Self.resolvedCodexLaunchSelection(
-                                for: result,
-                                defaultProfile: defaultCodexConfigProfile
-                            )
+                            shortcutProfile.codexLaunchProfileSelection = Self
+                                .resolvedCodexLaunchSelection(for: result)
                         }
                         try installer.installShortcut(for: shortcutProfile, codexAppURL: appURL)
                     }
@@ -1506,7 +1521,7 @@ final class CodexerModel: ObservableObject {
     func effectiveCodexConfigProfile(for profile: CodexProfile) -> CodexConfigProfile? {
         switch profile.codexLaunchProfileSelection {
         case .useDefault:
-            preferences.defaultCodexConfigProfile
+            profile.codexDefaultConfigProfile
         case .builtIn:
             nil
         case let .named(configProfile):
@@ -1514,30 +1529,62 @@ final class CodexerModel: ObservableObject {
         }
     }
 
-    func setDefaultCodexConfigProfile(_ configProfile: CodexConfigProfile?) {
-        preferences.defaultCodexConfigProfile = configProfile
-        let shortcutProfiles = profiles.filter {
-            $0.product == .codex
-                && $0.codexLaunchProfileSelection == .useDefault
-                && shortcutExists(for: $0)
-        }.map(resolvedProfileForLaunch)
+    func setDefaultCodexConfigProfile(
+        _ configProfile: CodexConfigProfile?,
+        for profile: CodexProfile
+    ) {
+        guard profile.product == .codex,
+              configProfile != profile.codexDefaultConfigProfile,
+              beginStoreMutationIfAvailable()
+        else { return }
+        guard let store else {
+            storeMutationInProgress = false
+            present(CodexerModelError.storeUnavailable)
+            return
+        }
+        if let configProfile {
+            do {
+                try configProfile.validate(in: profile.codexHomePath)
+            } catch {
+                storeMutationInProgress = false
+                present(error, code: .invalidConfiguration, provider: .codex, action: .configured)
+                return
+            }
+        }
+
+        let hadShortcut = shortcutExists(for: profile)
         let installer = shortcutInstaller
         let appURL = appURL(for: .codex)
+        busyProfileIDs.insert(profile.id)
         Task { [weak self] in
+            guard let self else { return }
+            defer {
+                storeMutationInProgress = false
+                busyProfileIDs.remove(profile.id)
+            }
             do {
-                try await Task.detached(priority: .utility) {
-                    for profile in shortcutProfiles {
-                        try installer.installShortcut(for: profile, codexAppURL: appURL)
-                    }
+                let updated = try await Task.detached(priority: .userInitiated) {
+                    try store.setCodexDefaultConfigProfile(
+                        id: profile.id,
+                        configProfile: configProfile
+                    )
                 }.value
-                self?.refreshRateLimits()
+                if hadShortcut, updated.codexLaunchProfileSelection == .useDefault {
+                    var shortcutProfile = updated
+                    shortcutProfile.codexLaunchProfileSelection = Self
+                        .resolvedCodexLaunchSelection(for: updated)
+                    try await Task.detached(priority: .utility) {
+                        try installer.installShortcut(for: shortcutProfile, codexAppURL: appURL)
+                    }.value
+                }
+                reload(refreshData: false)
+                selectProfile(profile.id)
+                refreshRateLimits(for: [updated], replaceAll: false)
+                errorMessage = nil
             } catch {
-                self?.present(
-                    error,
-                    code: .shortcutFailed,
-                    provider: .codex,
-                    action: .configured
-                )
+                reload(refreshData: false)
+                selectProfile(profile.id)
+                present(error, code: .persistenceFailed, provider: .codex, action: .configured)
             }
         }
     }
@@ -1558,7 +1605,7 @@ final class CodexerModel: ObservableObject {
 
         let resolvedSelection = Self.resolvedCodexLaunchSelection(
             selection,
-            defaultProfile: preferences.defaultCodexConfigProfile
+            defaultProfile: profile.codexDefaultConfigProfile
         )
         if case let .named(configProfile) = resolvedSelection {
             do {
@@ -1627,19 +1674,15 @@ final class CodexerModel: ObservableObject {
     private func resolvedCodexLaunchSelection(
         for profile: CodexProfile
     ) -> CodexLaunchProfileSelection {
-        Self.resolvedCodexLaunchSelection(
-            for: profile,
-            defaultProfile: preferences.defaultCodexConfigProfile
-        )
+        Self.resolvedCodexLaunchSelection(for: profile)
     }
 
     nonisolated private static func resolvedCodexLaunchSelection(
-        for profile: CodexProfile,
-        defaultProfile: CodexConfigProfile?
+        for profile: CodexProfile
     ) -> CodexLaunchProfileSelection {
         resolvedCodexLaunchSelection(
             profile.codexLaunchProfileSelection,
-            defaultProfile: defaultProfile
+            defaultProfile: profile.codexDefaultConfigProfile
         )
     }
 
