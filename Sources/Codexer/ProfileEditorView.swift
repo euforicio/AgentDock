@@ -13,7 +13,6 @@ struct EditProfileSheet: View {
     @State private var iconValue: String
     @State private var iconColor: String
     @State private var customIconData: Data?
-    @State private var codexProviderProfile: CodexProviderProfile?
     @FocusState private var nameFocused: Bool
 
     init(profile: CodexProfile) {
@@ -22,7 +21,6 @@ struct EditProfileSheet: View {
         _iconKind = State(initialValue: profile.iconKind)
         _iconValue = State(initialValue: profile.iconValue)
         _iconColor = State(initialValue: profile.iconColor)
-        _codexProviderProfile = State(initialValue: profile.codexProviderProfile)
     }
 
     var body: some View {
@@ -79,43 +77,6 @@ struct EditProfileSheet: View {
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-
-                if profile.product == .codex {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Provider Profile")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 10) {
-                            Picker("Provider Profile", selection: $codexProviderProfile) {
-                                Text("Built-in Codex").tag(CodexProviderProfile?.none)
-                                ForEach(availableCodexProviderProfiles) { providerProfile in
-                                    Text(providerProfile.displayName).tag(Optional(providerProfile))
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(width: 230)
-                            if codexProviderProfile != nil {
-                                Button("Use Built-in Codex") {
-                                    codexProviderProfile = nil
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                        Text("The saved choice is used for every launch. Built-in Codex pins the CLI bundled with the selected Codex app.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        if selectedCodexProviderProfileIsInvalid {
-                            Label(
-                                "The selected provider executable is unavailable. Choose Built-in Codex or repair it in Settings before launching.",
-                                systemImage: "exclamationmark.triangle"
-                            )
-                            .font(.system(size: 11))
-                            .foregroundStyle(.orange)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 12)
-                }
             }
             .scrollIndicators(.visible)
 
@@ -146,7 +107,7 @@ struct EditProfileSheet: View {
             .padding(.top, 10)
         }
         .padding(24)
-        .frame(width: 620, height: profile.product == .codex ? 510 : 400, alignment: .topLeading)
+        .frame(width: 620, height: 400, alignment: .topLeading)
         .background(AgentDockPalette.graphite)
         .onAppear {
             nameFocused = true
@@ -157,21 +118,6 @@ struct EditProfileSheet: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var availableCodexProviderProfiles: [CodexProviderProfile] {
-        var profiles = model.preferences.codexProviderProfiles
-        if let codexProviderProfile, !profiles.contains(where: { $0.id == codexProviderProfile.id }) {
-            profiles.append(codexProviderProfile)
-        }
-        return profiles.sorted {
-            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
-        }
-    }
-
-    private var selectedCodexProviderProfileIsInvalid: Bool {
-        guard let codexProviderProfile else { return false }
-        return (try? codexProviderProfile.validate()) == nil
-    }
-
     private func save() {
         guard !trimmedName.isEmpty, !model.storeMutationInProgress else { return }
         model.updateProfile(
@@ -180,8 +126,7 @@ struct EditProfileSheet: View {
             color: Color(hex: iconColor),
             iconKind: iconKind,
             iconValue: iconValue,
-            customIconData: customIconData,
-            codexProviderProfile: .some(codexProviderProfile)
+            customIconData: customIconData
         )
     }
 }

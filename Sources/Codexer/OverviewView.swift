@@ -33,10 +33,13 @@ private struct ProfileOverview: View {
           header
 
           if profile.product == .codex {
+            CodexConfigProfileCard(profile: profile)
+              .padding(.top, 18)
+
             UsageLimitsCard(
               limits: model.rateLimits(for: profile), accent: Color(hex: profile.iconColor)
             )
-            .padding(.top, 18)
+            .padding(.top, 16)
           } else {
             UsageLimitsCard(
               limits: model.rateLimits(for: profile),
@@ -133,13 +136,6 @@ private struct ProfileOverview: View {
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .lineLimit(1)
-          if profile.product == .codex {
-            Text(profile.codexProviderProfile.map { "Provider profile: \($0.displayName)" }
-              ?? "Provider profile: Built-in Codex")
-              .font(.system(size: 11))
-              .foregroundStyle(.tertiary)
-              .lineLimit(1)
-          }
           HStack(spacing: 10) {
             StatusDot(isRunning: status.isRunning, size: 8)
             Text(status.isRunning ? "Running" : "Stopped")
@@ -240,6 +236,103 @@ private struct ProfileOverview: View {
   private var lastOpenedText: String {
     guard let date = profile.lastLaunchedAt else { return "Never opened" }
     return "Last opened \(date.formatted(date: .abbreviated, time: .shortened))"
+  }
+}
+
+private struct CodexConfigProfileCard: View {
+  @EnvironmentObject private var model: CodexerModel
+  let profile: CodexProfile
+
+  var body: some View {
+    let running = model.instanceStatus(for: profile).isRunning
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Provider Profile")
+            .font(.system(size: 14, weight: .semibold))
+          Text(running
+            ? "Changing the selection restarts this Codex profile."
+            : "The selection is applied the next time this profile opens.")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Picker("Provider Profile", selection: selectionBinding) {
+          Text(defaultLabel).tag(CodexLaunchProfileSelection.useDefault)
+          Text("Built-in Codex (OAuth)").tag(CodexLaunchProfileSelection.builtIn)
+          ForEach(availableProfiles) { configProfile in
+            Text(configProfile.displayName).tag(CodexLaunchProfileSelection.named(configProfile))
+          }
+        }
+        .labelsHidden()
+        .frame(width: 230)
+        .disabled(model.isBusy(profile) || model.storeMutationInProgress)
+
+        Button {
+          model.setDefaultCodexConfigProfile(effectiveProfile)
+        } label: {
+          Label(isDefault ? "Default" : "Make Default", systemImage: isDefault
+            ? "checkmark.circle.fill" : "circle")
+        }
+        .buttonStyle(.bordered)
+        .disabled(isDefault || effectiveProfileIsUnavailable || model.storeMutationInProgress)
+        .help("Use this provider profile as the app default")
+      }
+
+      if effectiveProfileIsUnavailable {
+        Label(
+          "This named profile is not available in this profile's CODEX_HOME. Add its .config.toml file or choose Built-in Codex.",
+          systemImage: "exclamationmark.triangle"
+        )
+        .font(.system(size: 11))
+        .foregroundStyle(.orange)
+      } else {
+        Text(effectiveProfile == nil
+          ? "Built-in Codex uses the bundled CLI and the profile's normal Codex sign-in."
+          : "Named profiles are discovered from CODEX_HOME/<name>.config.toml and passed to Codex with --profile.")
+          .font(.system(size: 11))
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(16)
+    .background { OverviewSurfaceCard(cornerRadius: 8) }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Codex provider profile")
+  }
+
+  private var selectionBinding: Binding<CodexLaunchProfileSelection> {
+    Binding(
+      get: { profile.codexLaunchProfileSelection },
+      set: { model.setCodexLaunchProfileSelection($0, for: profile) }
+    )
+  }
+
+  private var availableProfiles: [CodexConfigProfile] {
+    var profiles = model.codexConfigProfiles(for: profile)
+    if case let .named(selected) = profile.codexLaunchProfileSelection,
+       !profiles.contains(selected) {
+      profiles.append(selected)
+    }
+    return profiles.sorted {
+      $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+    }
+  }
+
+  private var effectiveProfile: CodexConfigProfile? {
+    model.effectiveCodexConfigProfile(for: profile)
+  }
+
+  private var effectiveProfileIsUnavailable: Bool {
+    guard let effectiveProfile else { return false }
+    return !model.codexConfigProfiles(for: profile).contains(effectiveProfile)
+  }
+
+  private var isDefault: Bool {
+    effectiveProfile == model.preferences.defaultCodexConfigProfile
+  }
+
+  private var defaultLabel: String {
+    "Use Default (\(model.preferences.defaultCodexConfigProfile?.displayName ?? "Built-in Codex"))"
   }
 }
 

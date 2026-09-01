@@ -24,14 +24,15 @@ Codex profiles use:
 ```text
 CODEX_HOME=<profile>/CODEX_HOME
 --user-data-dir=<profile>/ElectronUserData
+[optional] --profile <name>
 ```
 
-A managed Codex profile may also persist one provider profile: a user-selected,
-regular, non-symlink executable that implements Codex Desktop's app-server
-contract. AgentDock passes its absolute path through `CODEX_CLI_PATH`.
-Selecting **Built-in Codex** stores no provider profile and pins
-`CODEX_CLI_PATH` to the CLI bundled with the selected Codex app. Installed
-shortcuts carry the same selection.
+Named profiles are discovered from `<profile>/CODEX_HOME/<name>.config.toml`.
+AgentDock stores whether each managed profile uses the app default, forces the
+built-in configuration, or selects one named profile. The launch helper layers
+the named file through Codex's supported `--profile` argument while keeping
+`CODEX_CLI_PATH` pinned to AgentDock's bundled proxy and, ultimately, the CLI
+bundled inside the validated Codex app.
 
 Claude profiles use:
 
@@ -46,8 +47,7 @@ not use a generic Electron profile flag for Claude.
 ## Persistent Formats
 
 - `profiles.json`: AgentDock-owned profile metadata. Array order preserves the
-  user-defined managed-profile order within each provider section. Codex
-  records may include the optional Codex provider profile used at launch.
+  user-defined managed-profile order within each provider section.
 - Profile ownership markers: bind managed directories to persisted profiles.
 - Shortcut configuration plist: binds a generated shortcut to one provider,
   profile root, and ownership identity.

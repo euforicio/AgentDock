@@ -528,7 +528,7 @@ private struct ProfileSidebarRow: View {
                             if model.preferences.showStatusInProfileList {
                                 StatusDot(isRunning: running, size: 6)
                             }
-                            Text(profile.slug)
+                            Text(sidebarSubtitle)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -569,6 +569,13 @@ private struct ProfileSidebarRow: View {
             }
             return onMove(draggedID, location.y >= Self.rowHeight / 2)
         }
+    }
+
+    private var sidebarSubtitle: String {
+        guard profile.product == .codex else { return profile.slug }
+        let provider = model.effectiveCodexConfigProfile(for: profile)?.displayName
+            ?? "Built-in Codex"
+        return "\(profile.slug) · \(provider)"
     }
 }
 

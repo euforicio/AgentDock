@@ -30,8 +30,7 @@ public struct AgentDockPreferences: Equatable, Sendable {
     public var refreshProfileActivity: Bool
     public var refreshIntervalMinutes: Int
     public var showStatusInProfileList: Bool
-    public var codexProviderProfiles: [CodexProviderProfile] = []
-    public var defaultCodexProviderProfileID: CodexProviderProfile.ID?
+    public var defaultCodexConfigProfile: CodexConfigProfile? = nil
 
     public static let defaults = AgentDockPreferences(
         appearance: .system,
@@ -39,8 +38,7 @@ public struct AgentDockPreferences: Equatable, Sendable {
         refreshProfileActivity: true,
         refreshIntervalMinutes: 5,
         showStatusInProfileList: true,
-        codexProviderProfiles: [],
-        defaultCodexProviderProfileID: nil
+        defaultCodexConfigProfile: nil
     )
 }
 
@@ -67,22 +65,15 @@ public struct AgentDockPreferencesStore {
         let showStatus = defaults.object(forKey: Key.showStatusInProfileList) == nil
             ? standard.showStatusInProfileList
             : defaults.bool(forKey: Key.showStatusInProfileList)
-        let providerProfiles = defaults.data(forKey: Key.codexProviderProfiles)
-            .flatMap { try? JSONDecoder().decode([CodexProviderProfile].self, from: $0) }
-            ?? standard.codexProviderProfiles
-        let defaultProviderProfileID = defaults.string(forKey: Key.defaultCodexProviderProfileID)
-            .flatMap(UUID.init(uuidString:))
-        let validatedDefaultID = providerProfiles.contains { $0.id == defaultProviderProfileID }
-            ? defaultProviderProfileID
-            : nil
+        let defaultCodexConfigProfile = defaults.string(forKey: Key.defaultCodexConfigProfile)
+            .flatMap { try? CodexConfigProfile(validating: $0) }
         return AgentDockPreferences(
             appearance: appearance,
             defaultView: defaultView,
             refreshProfileActivity: refresh,
             refreshIntervalMinutes: interval,
             showStatusInProfileList: showStatus,
-            codexProviderProfiles: providerProfiles,
-            defaultCodexProviderProfileID: validatedDefaultID
+            defaultCodexConfigProfile: defaultCodexConfigProfile
         )
     }
 
@@ -98,12 +89,8 @@ public struct AgentDockPreferencesStore {
         )
         defaults.set(preferences.showStatusInProfileList, forKey: Key.showStatusInProfileList)
         defaults.set(
-            try? JSONEncoder().encode(preferences.codexProviderProfiles),
-            forKey: Key.codexProviderProfiles
-        )
-        defaults.set(
-            preferences.defaultCodexProviderProfileID?.uuidString,
-            forKey: Key.defaultCodexProviderProfileID
+            preferences.defaultCodexConfigProfile?.name,
+            forKey: Key.defaultCodexConfigProfile
         )
     }
 
@@ -114,8 +101,7 @@ public struct AgentDockPreferencesStore {
             Key.refreshProfileActivity,
             Key.refreshIntervalMinutes,
             Key.showStatusInProfileList,
-            Key.codexProviderProfiles,
-            Key.defaultCodexProviderProfileID
+            Key.defaultCodexConfigProfile
         ].forEach(defaults.removeObject(forKey:))
     }
 
@@ -127,7 +113,6 @@ public struct AgentDockPreferencesStore {
         static let refreshProfileActivity = "AgentDock.refreshProfileActivity"
         static let refreshIntervalMinutes = "AgentDock.refreshIntervalMinutes"
         static let showStatusInProfileList = "AgentDock.showStatusInProfileList"
-        static let codexProviderProfiles = "AgentDock.codexProviderProfiles"
-        static let defaultCodexProviderProfileID = "AgentDock.defaultCodexProviderProfileID"
+        static let defaultCodexConfigProfile = "AgentDock.defaultCodexConfigProfile"
     }
 }

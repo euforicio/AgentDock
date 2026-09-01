@@ -47,6 +47,26 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertEqual(environment["PRESERVED_VALUE"], "unchanged")
     }
 
+    func testNamedConfigProfileUsesBundledProxyAndExplicitProfileEnvironment() throws {
+        let appURL = URL(fileURLWithPath: "/Applications/Codex.app")
+        let proxyURL = URL(fileURLWithPath: "/Applications/AgentDock.app/Contents/Resources/AgentDockShortcutLauncher")
+        let configProfile = try CodexConfigProfile(validating: "ollama")
+
+        let environment = SystemCodexWorkspaceLauncher.launchEnvironment(
+            inheriting: ["AGENTDOCK_CODEX_CONFIG_PROFILE": "stale"],
+            codexAppURL: appURL,
+            codexHomePath: "/tmp/selected-home",
+            configProfile: configProfile,
+            profileProxyURL: proxyURL
+        )
+
+        XCTAssertEqual(environment["CODEX_CLI_PATH"], proxyURL.path)
+        XCTAssertEqual(environment["CODEX_HOME"], "/tmp/selected-home")
+        XCTAssertEqual(environment["AGENTDOCK_CODEX_PROFILE_PROXY"], "1")
+        XCTAssertEqual(environment["AGENTDOCK_CODEX_APP_PATH"], appURL.path)
+        XCTAssertEqual(environment["AGENTDOCK_CODEX_CONFIG_PROFILE"], "ollama")
+    }
+
     func testDiscoverySeparatesMainAppProfilesAndIgnoresHelpers() {
         let profile = makeProfile(slug: "work")
         let configuration = configuration(for: profile)
@@ -255,63 +275,6 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertEqual(lifecycle.focusedProcessIDs, [741])
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.codexHomePath.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: profile.electronUserDataPath.path))
-    }
-
-    func testOpenRejectsMissingCodexProviderExecutableBeforeLaunch() async throws {
-        var profile = makeProfile(slug: "missing-provider-profile")
-        let missingExecutable = profile.profileDirectory.appendingPathComponent("missing-cli")
-        profile.codexProviderProfile = CodexProviderProfile(
-            name: "Missing",
-            executableURL: missingExecutable
-        )
-        try prepareIsolationLayout(for: profile)
-        let launcher = RecordingWorkspaceLauncher(processID: 741)
-        let controller = CodexInstanceController(
-            validator: AcceptingValidator(),
-            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
-            workspaceLauncher: launcher,
-            lifecycleController: RecordingLifecycleController(running: [741])
-        )
-
-        do {
-            _ = try await controller.open(
-                profile: profile,
-                codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app")
-            )
-            XCTFail("Expected the missing provider executable to be rejected")
-        } catch {
-            XCTAssertEqual(
-                error as? CodexLauncherError,
-                .invalidCodexProviderProfile(missingExecutable.path)
-            )
-        }
-        let launchedConfigurations = await launcher.configurations()
-        XCTAssertTrue(launchedConfigurations.isEmpty)
-    }
-
-    func testOpenFocusesExistingInstanceEvenWhenProviderExecutableWasRemoved() async throws {
-        var profile = makeProfile(slug: "removed-provider-profile")
-        profile.codexProviderProfile = CodexProviderProfile(
-            name: "Removed",
-            executableURL: profile.profileDirectory.appendingPathComponent("removed-cli")
-        )
-        try prepareIsolationLayout(for: profile)
-        let configuration = configuration(for: profile)
-        let snapshot = "202 \(configuration.appExecutableURL.path) --user-data-dir=\(configuration.electronUserDataPath)"
-        let lifecycle = RecordingLifecycleController(running: [202])
-        let launcher = RecordingWorkspaceLauncher(processID: 741)
-        let controller = CodexInstanceController(
-            validator: AcceptingValidator(),
-            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: snapshot),
-            workspaceLauncher: launcher,
-            lifecycleController: lifecycle
-        )
-
-        let outcome = try await controller.open(configuration: configuration)
-
-        XCTAssertEqual(outcome, .focused(processID: 202))
-        let launchedConfigurations = await launcher.configurations()
-        XCTAssertTrue(launchedConfigurations.isEmpty)
     }
 
     func testOpenTerminatesVerifiedOrphanedHelperBeforeLaunchingReplacement() async throws {
