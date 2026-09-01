@@ -23,11 +23,12 @@ if [[ -z "$VERSION" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
   VERSION="${GITHUB_REF_NAME#v}"
 fi
 VERSION="${VERSION:-0.1.1}"
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: AGENTDOCK_VERSION must use MAJOR.MINOR.PATCH format" >&2
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$ ]]; then
+  echo "error: AGENTDOCK_VERSION must use MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-alpha.NUMBER format" >&2
   exit 1
 fi
-IFS=. read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<<"$VERSION"
+BASE_VERSION="${VERSION%%-*}"
+IFS=. read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<<"$BASE_VERSION"
 if (( 10#$VERSION_MAJOR > 999 || 10#$VERSION_MINOR > 999 || 10#$VERSION_PATCH > 999 )); then
   echo "error: release version components must be no greater than 999" >&2
   exit 1

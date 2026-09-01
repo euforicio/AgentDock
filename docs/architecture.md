@@ -19,6 +19,9 @@ or conversations change. See
 manual checks. Sparkle persists the user's automatic-check and
 automatic-download preferences; AgentDock does not create a parallel updater
 preference store. Configured release builds ask Sparkle to check once per hour.
+The Stable release channel is selected by default. An explicit Settings choice
+switches Sparkle to the signed Alpha appcast and channel; switching back restores
+the built-in Stable appcast immediately.
 Users can change that cadence to every six hours, daily, or weekly in Settings;
 Sparkle persists the selected interval and resets its scheduled update cycle.
 Unless the user opts into automatic downloads, scheduled discoveries appear as

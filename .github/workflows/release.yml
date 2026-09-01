@@ -4,12 +4,14 @@ on:
   push:
     tags:
       - "v*"
+      - "alpha-*"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: agentdock-stable-release
+  group: agentdock-release
   cancel-in-progress: false
 
 jobs:
@@ -17,6 +19,10 @@ jobs:
     name: Build signed and notarized macOS app
     runs-on: blacksmith-6vcpu-macos-latest
     environment: release
+    outputs:
+      channel: ${{ steps.release_metadata.outputs.channel }}
+      version: ${{ steps.release_metadata.outputs.version }}
+      feed_filename: ${{ steps.release_metadata.outputs.feed_filename }}
     env:
       AGENTDOCK_BUILD_SCRATCH_DIR: /tmp/agentdock-release-build
       AGENTDOCK_SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
@@ -29,61 +35,103 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate release version
+      - name: Validate release metadata
+        id: release_metadata
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tags must use vMAJOR.MINOR.PATCH format." >&2
-            exit 1
-          fi
           if [[ -z "$AGENTDOCK_SPARKLE_PUBLIC_KEY" ]]; then
             echo "The release environment variable SPARKLE_PUBLIC_ED_KEY is required." >&2
             exit 1
           fi
 
           git fetch --force --tags origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "Release tags must point to a commit contained in origin/main." >&2
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$GITHUB_REF_NAME" != alpha-* ]]; then
+            echo "Workflow dispatch is reserved for automated Alpha tags." >&2
             exit 1
           fi
-          highest_tag="$(
+          highest_stable_tag="$(
             git tag --list 'v*' --sort=-v:refname \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
               | head -n 1
           )"
-          if [[ "$highest_tag" != "$GITHUB_REF_NAME" ]]; then
-            echo "Release tag $GITHUB_REF_NAME is not the highest version tag ($highest_tag)." >&2
+          if [[ -z "$highest_stable_tag" ]]; then
+            echo "At least one stable vMAJOR.MINOR.PATCH tag is required." >&2
             exit 1
           fi
 
-          version_greater_than() {
-            local candidate="$1"
-            local previous="$2"
-            local candidate_major candidate_minor candidate_patch
-            local previous_major previous_minor previous_patch
-            IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$candidate"
-            IFS=. read -r previous_major previous_minor previous_patch <<<"$previous"
-            (( 10#$candidate_major > 10#$previous_major )) && return 0
-            (( 10#$candidate_major < 10#$previous_major )) && return 1
-            (( 10#$candidate_minor > 10#$previous_minor )) && return 0
-            (( 10#$candidate_minor < 10#$previous_minor )) && return 1
-            (( 10#$candidate_patch > 10#$previous_patch ))
-          }
-          public_appcast="$RUNNER_TEMP/current-appcast.xml"
-          curl -fsSL --retry 3 \
-            "https://euforicio.github.io/AgentDock/appcast.xml?release-check=$GITHUB_RUN_ID" \
-            -o "$public_appcast"
-          public_version="$(./script/latest_appcast_version.sh "$public_appcast")"
-          if ! version_greater_than "$version" "$public_version"; then
-            echo "Release version $version must be newer than public appcast version $public_version." >&2
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            channel="stable"
+            feed_filename="appcast.xml"
+            version="${GITHUB_REF_NAME#v}"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Stable release tags must use vMAJOR.MINOR.PATCH format." >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "Stable release tags must point to a commit contained in origin/main." >&2
+              exit 1
+            fi
+            if [[ "$highest_stable_tag" != "$GITHUB_REF_NAME" ]]; then
+              echo "Release tag $GITHUB_REF_NAME is not the highest version tag ($highest_stable_tag)." >&2
+              exit 1
+            fi
+
+            version_greater_than() {
+              local candidate="$1"
+              local previous="$2"
+              local candidate_major candidate_minor candidate_patch
+              local previous_major previous_minor previous_patch
+              IFS=. read -r candidate_major candidate_minor candidate_patch <<<"$candidate"
+              IFS=. read -r previous_major previous_minor previous_patch <<<"$previous"
+              (( 10#$candidate_major > 10#$previous_major )) && return 0
+              (( 10#$candidate_major < 10#$previous_major )) && return 1
+              (( 10#$candidate_minor > 10#$previous_minor )) && return 0
+              (( 10#$candidate_minor < 10#$previous_minor )) && return 1
+              (( 10#$candidate_patch > 10#$previous_patch ))
+            }
+            public_appcast="$RUNNER_TEMP/current-appcast.xml"
+            curl -fsSL --retry 3 \
+              "https://euforicio.github.io/AgentDock/appcast.xml?release-check=$GITHUB_RUN_ID" \
+              -o "$public_appcast"
+            public_version="$(./script/latest_appcast_version.sh "$public_appcast")"
+            if ! version_greater_than "$version" "$public_version"; then
+              echo "Release version $version must be newer than public appcast version $public_version." >&2
+              exit 1
+            fi
+          elif [[ "$GITHUB_REF_NAME" =~ ^alpha-[0-9]{14}-[0-9a-f]{7,40}$ ]]; then
+            channel="alpha"
+            feed_filename="appcast-alpha.xml"
+            if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+              echo "Alpha releases must point to the current origin/main commit." >&2
+              exit 1
+            fi
+            stable_version="${highest_stable_tag#v}"
+            IFS=. read -r stable_major stable_minor stable_patch <<<"$stable_version"
+            version="$stable_major.$stable_minor.$((10#$stable_patch + 1))-alpha.$GITHUB_RUN_NUMBER"
+          else
+            echo "Release tags must use vMAJOR.MINOR.PATCH or alpha-YYYYMMDDHHMMSS-SHA format." >&2
             exit 1
           fi
-          echo "AGENTDOCK_VERSION=$version" >> "$GITHUB_ENV"
+
+          build_number="$((1000000 + GITHUB_RUN_NUMBER))"
+          {
+            echo "AGENTDOCK_VERSION=$version"
+            echo "AGENTDOCK_BUILD_NUMBER=$build_number"
+            echo "channel=$channel"
+            echo "version=$version"
+            echo "feed_filename=$feed_filename"
+          } >> "$GITHUB_ENV"
+          {
+            echo "channel=$channel"
+            echo "version=$version"
+            echo "feed_filename=$feed_filename"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Run full tests
+        if: steps.release_metadata.outputs.channel == 'stable'
         run: swift test
 
       - name: Run vendored renderer tests
+        if: steps.release_metadata.outputs.channel == 'stable'
         run: swift test --package-path Vendor/streamdown-swift
 
       - name: Prepare Developer ID signing and notarization
@@ -250,6 +298,9 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
+    env:
+      AGENTDOCK_VERSION: ${{ needs.build.outputs.version }}
+      RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
 
     steps:
       - name: Download packaged artifacts
@@ -270,19 +321,23 @@ jobs:
             dist/AgentDock-*.dmg
             dist/AgentDock-*.sha256
           generate_release_notes: true
-          make_latest: true
+          prerelease: ${{ needs.build.outputs.channel == 'alpha' }}
+          make_latest: ${{ needs.build.outputs.channel == 'stable' }}
           fail_on_unmatched_files: true
           overwrite_files: false
 
   appcast:
-    name: Sign and publish stable appcast last
-    needs: release
+    name: Sign and publish selected appcast last
+    needs: [build, release]
     runs-on: blacksmith-6vcpu-macos-latest
     environment: release
     permissions:
       contents: write
     env:
       SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+      AGENTDOCK_VERSION: ${{ needs.build.outputs.version }}
+      RELEASE_CHANNEL: ${{ needs.build.outputs.channel }}
+      FEED_FILENAME: ${{ needs.build.outputs.feed_filename }}
 
     steps:
       - name: Check out repository
@@ -302,8 +357,7 @@ jobs:
             echo "The release environment secret SPARKLE_PRIVATE_ED_KEY is required." >&2
             exit 1
           fi
-          version="${GITHUB_REF_NAME#v}"
-          archive_name="AgentDock-$version.zip"
+          archive_name="AgentDock-$AGENTDOCK_VERSION.zip"
           archive_dir="$RUNNER_TEMP/agentdock-appcast"
           asset_url="https://github.com/euforicio/AgentDock/releases/download/$GITHUB_REF_NAME/$archive_name"
           mkdir -p "$archive_dir"
@@ -333,6 +387,10 @@ jobs:
           sign_update=".build/artifacts/sparkle/Sparkle/bin/sign_update"
           test -x "$generate_appcast"
           test -x "$sign_update"
+          channel_arguments=()
+          if [[ "$RELEASE_CHANNEL" == "alpha" ]]; then
+            channel_arguments=(--channel alpha)
+          fi
           printf '%s' "$SPARKLE_PRIVATE_ED_KEY" \
             | "$generate_appcast" \
               --ed-key-file - \
@@ -340,6 +398,7 @@ jobs:
               --link "https://github.com/euforicio/AgentDock" \
               --maximum-versions 3 \
               --maximum-deltas 0 \
+              "${channel_arguments[@]}" \
               -o "$archive_dir/appcast.xml" \
               "$archive_dir"
 
@@ -350,9 +409,12 @@ jobs:
             "$appcast"
           /usr/bin/grep -Fq 'sparkle:edSignature=' "$appcast"
           /usr/bin/grep -Fq '<!-- sparkle-signatures:' "$appcast"
+          if [[ "$RELEASE_CHANNEL" == "alpha" ]]; then
+            /usr/bin/grep -Fq '<sparkle:channel>alpha</sparkle:channel>' "$appcast"
+          fi
           printf '%s' "$SPARKLE_PRIVATE_ED_KEY" \
             | "$sign_update" --verify --ed-key-file - "$appcast" >/dev/null
-          cp "$appcast" "$RUNNER_TEMP/AgentDock-appcast.xml"
+          cp "$appcast" "$RUNNER_TEMP/$FEED_FILENAME"
 
       - name: Publish GitHub Pages appcast
         run: |
@@ -363,16 +425,16 @@ jobs:
             git checkout --orphan gh-pages
             git rm -rf .
           fi
-          cp "$RUNNER_TEMP/AgentDock-appcast.xml" appcast.xml
+          cp "$RUNNER_TEMP/$FEED_FILENAME" "$FEED_FILENAME"
           touch .nojekyll
-          git add appcast.xml .nojekyll
+          git add "$FEED_FILENAME" .nojekyll
           if git diff --cached --quiet; then
             echo "Appcast is already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Publish AgentDock $GITHUB_REF_NAME appcast"
+          git commit -m "Publish AgentDock $GITHUB_REF_NAME $RELEASE_CHANNEL appcast"
           git push origin HEAD:gh-pages
 
       - name: Verify public appcast bytes and signature
@@ -382,9 +444,9 @@ jobs:
           published=0
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
             if curl -fsSL \
-              "https://euforicio.github.io/AgentDock/appcast.xml?release-run=$GITHUB_RUN_ID&attempt=$attempt" \
+              "https://euforicio.github.io/AgentDock/$FEED_FILENAME?release-run=$GITHUB_RUN_ID&attempt=$attempt" \
               -o "$public_appcast" \
-              && cmp -s "$RUNNER_TEMP/AgentDock-appcast.xml" "$public_appcast"; then
+              && cmp -s "$RUNNER_TEMP/$FEED_FILENAME" "$public_appcast"; then
               published=1
               break
             fi

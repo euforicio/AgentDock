@@ -138,10 +138,11 @@ configuration, raw error, log, or crash content enters this flow.
 
 ## Release Artifacts
 
-1. A `vMAJOR.MINOR.PATCH` tag starts the only
-   [release workflow](../.github/workflows/release.yml); branches, pull requests,
-   schedules, and manual dispatches cannot start it.
-2. The workflow runs the full Swift test suite.
+1. A `vMAJOR.MINOR.PATCH` tag starts a Stable release. A successful `Quality`
+   run for a push to `main` starts a ten-minute coalescing window, then creates
+   and dispatches an immutable Alpha tag for the latest tested revision.
+2. Stable releases run the full Swift test suite. Alpha releases reuse the
+   successful `Quality` result for the exact tagged commit.
 3. A production app is built with hardened runtime and a Developer ID
    signature.
 4. Sparkle.framework, its updater helper, and its XPC services are signed from
@@ -153,6 +154,7 @@ configuration, raw error, log, or crash content enters this flow.
    [package_app.sh](../script/package_app.sh).
 8. Only after the immutable release ZIP exists, Sparkle's `generate_appcast`
    signs an enclosure pointing at that tagged asset. The signed appcast is the
-   final publication, on the `gh-pages` branch.
+   final publication, as `appcast.xml` for Stable or `appcast-alpha.xml` for
+   Alpha on the `gh-pages` branch.
 
 No release credential is stored in the repository or packaged artifact.

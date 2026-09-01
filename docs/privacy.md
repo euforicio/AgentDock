@@ -23,8 +23,10 @@ months. Privacy concerns can be reported through the private security advisory
 flow. This policy is effective August 28, 2026. Builds without valid release
 configuration cannot deliver analytics.
 
-Signed release builds check the public Sparkle appcast on GitHub Pages hourly by
-default so security and reliability updates can be offered promptly. This is a
+Signed release builds check the public Stable Sparkle appcast on GitHub Pages
+hourly by default so security and reliability updates can be offered promptly.
+Users may opt into the separate Alpha appcast in Settings and return to Stable
+at any time. Each check is a
 standard HTTPS request to GitHub's service and therefore exposes ordinary
 network metadata to that service; it does not include profile, account, chat,
 or analytics identifiers. Users can change the frequency or disable automatic

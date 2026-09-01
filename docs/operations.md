@@ -30,12 +30,14 @@ in [Product analytics](analytics.md). Configure them only after reviewing the
 project region, IP capture, person profiles, access, and retention. The build
 accepts only a public `phc_` token and an official US or EU ingestion host.
 
-## Continuous Integration and Tag-Only Releases
+## Continuous Integration and Release Channels
 
 `.github/workflows/ci.yml` validates pull requests and every push to `main`. It
 runs the root and vendored test suites, the repository privacy audit, and an
-ad-hoc build/package cycle. `.github/workflows/release.yml` remains tag-only; it
-has no branch, pull-request, schedule, or manual-dispatch trigger. Equivalent
+ad-hoc build/package cycle. `.github/workflows/release.yml` remains tag-only and
+accepts stable `v*` tags plus automated `alpha-*` tags. Its dispatch entrypoint
+is reserved for the Alpha trigger and rejects stable tags; it has no branch,
+pull-request, schedule, or general manual-release path. Equivalent
 local validation is:
 
 ```bash
@@ -48,24 +50,38 @@ swift test --package-path Vendor/streamdown-swift
 
 The tag workflow:
 
-1. serializes all stable releases, validates `vMAJOR.MINOR.PATCH`, requires the
-   tag commit to be on `origin/main`, rejects version rollback against tags and
-   the public appcast, and runs both test suites;
-2. builds with a monotonic numeric `CFBundleVersion` derived from the semantic
-   version;
-3. signs Sparkle's nested components and AgentDock with Developer ID and the
+1. serializes all releases, validates stable `vMAJOR.MINOR.PATCH` tags or
+   automated Alpha tags, and requires their commit to be on `origin/main`;
+2. rejects stable version rollback against tags and the public appcast, then
+   runs both test suites (Alpha tags reuse the successful `Quality` run for the
+   exact commit);
+3. builds with an offset workflow run number as a monotonic numeric
+   `CFBundleVersion`, so a later Stable build can supersede an earlier Alpha;
+4. signs Sparkle's nested components and AgentDock with Developer ID and the
    hardened runtime;
-4. notarizes, staples, and verifies the app and DMG with Gatekeeper;
-5. publishes the ZIP, DMG, and checksums to the immutable GitHub Release;
-6. downloads the public ZIP and byte-compares it with the notarized workflow
+5. notarizes, staples, and verifies the app and DMG with Gatekeeper;
+6. publishes the ZIP, DMG, and checksums to the immutable GitHub Release;
+7. downloads the public ZIP and byte-compares it with the notarized workflow
    artifact before generating an Ed25519-signed appcast;
-7. pushes `appcast.xml` to `gh-pages` only after every earlier gate succeeds;
-8. polls the public Pages URL until its bytes exactly match the generated feed,
+8. pushes the selected appcast to `gh-pages` only after every earlier gate succeeds;
+9. polls the public Pages URL until its bytes exactly match the generated feed,
    then verifies its Ed25519 signature again.
 
-Clients use `https://euforicio.github.io/AgentDock/appcast.xml`. Configure
+Stable clients use `https://euforicio.github.io/AgentDock/appcast.xml`. Alpha
+clients use `https://euforicio.github.io/AgentDock/appcast-alpha.xml`, which
+also retains Stable entries as a fallback. Stable is the app default and users
+can change channels at any time in Settings. Configure
 GitHub Pages to publish from the root of the `gh-pages` branch before the first
 Sparkle-enabled release.
+
+`.github/workflows/alpha-trigger.yml` waits for a successful `Quality` run on a
+push to `main`, then waits ten minutes before tagging that exact revision. Its
+cancel-in-progress concurrency group coalesces nearby merges: a newer merge
+cancels the older wait, and only the newest tested `main` revision advances to
+the expensive signed and notarized pipeline. The trigger dispatches that
+pipeline explicitly because GitHub suppresses recursive tag workflow runs from
+the default Actions token. Alpha GitHub Releases are marked
+as prereleases and never replace the latest Stable release.
 
 The `Euforicio` organization must also allow **Read and write permissions** for
 GitHub Actions workflow tokens under **Organization Settings → Actions →
