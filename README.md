@@ -35,7 +35,7 @@ and can have its own Dock-pinnable shortcut.
 - Focus and close an exact profile without quitting another running instance.
 - Select a named Codex config profile such as Ollama for each managed profile,
   switch a running profile with an automatic restart, and return to the
-  app-wide default or Built-in Codex OAuth at any time.
+  managed profile's own default or Built-in Codex OAuth at any time.
 - Install native, profile-specific shortcuts under
   `~/Applications/AgentDock/`.
 - Check for, download, and install signed AgentDock updates with Sparkle.
@@ -85,9 +85,10 @@ release procedures.
 
 For Codex, the profile Overview discovers named configuration files at
 `CODEX_HOME/<name>.config.toml`. Choose **Use Default**, **Built-in Codex
-(OAuth)**, or a named profile. **Make Default** changes the app-wide provider
-profile default. Changing the selection while Codex is running closes that
-managed instance and reopens it with `--profile <name>`.
+(OAuth)**, or a named profile. **Make Default** changes the provider default
+only for the selected managed profile. Changing the selection while Codex is
+running closes and reopens only that managed instance with the selected file
+applied as desktop app-server configuration overrides.
 
 Drag managed profiles within their provider section to keep the sidebar in the
 order you prefer. The order persists across launches; official provider rows

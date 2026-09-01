@@ -251,6 +251,23 @@ final class ProfileStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.profiles.first?.codexLaunchProfileSelection, .useDefault)
     }
 
+    func testCodexDefaultConfigProfileIsScopedToOneManagedProfile() throws {
+        let first = try store.createProfile(name: "First")
+        let second = try store.createProfile(name: "Second")
+        let configProfile = try CodexConfigProfile(validating: "ollama")
+
+        let updated = try store.setCodexDefaultConfigProfile(
+            id: first.id,
+            configProfile: configProfile
+        )
+
+        XCTAssertEqual(updated.codexDefaultConfigProfile, configProfile)
+        XCTAssertNil(store.profiles.first(where: { $0.id == second.id })?.codexDefaultConfigProfile)
+
+        _ = try store.setCodexDefaultConfigProfile(id: first.id, configProfile: nil)
+        XCTAssertNil(store.profiles.first(where: { $0.id == first.id })?.codexDefaultConfigProfile)
+    }
+
     func testLegacyProfilesReceiveStableUniqueMCPCallbackPorts() throws {
         let personal = try store.createProfile(name: "Personal")
         let work = try store.createProfile(name: "Work")

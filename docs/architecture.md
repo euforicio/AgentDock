@@ -86,8 +86,9 @@ delegates to the same core launch rules used by the main app through
 [ShortcutLauncherRunner.swift](../Sources/CodexerCore/ShortcutLauncherRunner.swift).
 For a selected named Codex config profile, the same signed helper becomes a
 bounded CLI proxy: it validates the official app and the profile-local
-`<name>.config.toml`, then executes the app's bundled CLI with `--profile
-<name>`. User-selected executables are never part of this contract.
+`<name>.config.toml`, translates its assignments into bounded `--config`
+arguments, then executes the app's bundled CLI. User-selected executables are
+never part of this contract.
 After an AgentDock update, installed shortcuts with an older embedded helper
 build are rebuilt through `ShortcutInstaller`'s existing locked, atomic path.
 Profile identifiers, ownership markers, configurations, sessions, and other
@@ -99,8 +100,8 @@ Managed Codex profiles receive separate `CODEX_HOME` and Electron user-data
 directories. Managed Claude profiles receive separate `UserData` roots through
 the verified `CLAUDE_USER_DATA_DIR` launch contract.
 
-Codex launch-profile selection is profile-local metadata with an app-wide
-default. `Use Default`, explicit Built-in Codex, and a named config profile are
+Codex launch-profile selection and its default are both profile-local metadata.
+`Use Default`, explicit Built-in Codex, and a named config profile are
 distinct persisted states, so changing the default does not erase an explicit
 built-in override.
 

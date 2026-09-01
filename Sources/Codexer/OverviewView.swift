@@ -269,14 +269,14 @@ private struct CodexConfigProfileCard: View {
         .disabled(model.isBusy(profile) || model.storeMutationInProgress)
 
         Button {
-          model.setDefaultCodexConfigProfile(effectiveProfile)
+          model.setDefaultCodexConfigProfile(effectiveProfile, for: profile)
         } label: {
           Label(isDefault ? "Default" : "Make Default", systemImage: isDefault
             ? "checkmark.circle.fill" : "circle")
         }
         .buttonStyle(.bordered)
         .disabled(isDefault || effectiveProfileIsUnavailable || model.storeMutationInProgress)
-        .help("Use this provider profile as the app default")
+        .help("Use this provider profile as the default for \(profile.name)")
       }
 
       if effectiveProfileIsUnavailable {
@@ -289,7 +289,7 @@ private struct CodexConfigProfileCard: View {
       } else {
         Text(effectiveProfile == nil
           ? "Built-in Codex uses the bundled CLI and the profile's normal Codex sign-in."
-          : "Named profiles are discovered from CODEX_HOME/<name>.config.toml and passed to Codex with --profile.")
+          : "Named profiles are discovered only from this profile's CODEX_HOME and applied to its desktop app-server launch.")
           .font(.system(size: 11))
           .foregroundStyle(.secondary)
       }
@@ -328,11 +328,11 @@ private struct CodexConfigProfileCard: View {
   }
 
   private var isDefault: Bool {
-    effectiveProfile == model.preferences.defaultCodexConfigProfile
+    effectiveProfile == profile.codexDefaultConfigProfile
   }
 
   private var defaultLabel: String {
-    "Use Default (\(model.preferences.defaultCodexConfigProfile?.displayName ?? "Built-in Codex"))"
+    "Use Default (\(profile.codexDefaultConfigProfile?.displayName ?? "Built-in Codex"))"
   }
 }
 
