@@ -116,14 +116,27 @@ public actor DesktopInstanceController {
 
     public func openStock(
         product: DesktopProduct,
-        appURL: URL
+        appURL: URL,
+        codexHomeURL: URL?,
+        codexConfigProfile: CodexConfigProfile?
     ) async throws -> CodexOpenOutcome {
         switch product {
         case .codex:
-            return try await codexController.openStock(codexAppURL: appURL)
+            guard let codexHomeURL else {
+                throw DesktopInstanceControllerError.invalidShortcutConfiguration
+            }
+            return try await codexController.openStock(
+                codexAppURL: appURL,
+                codexHomeURL: codexHomeURL,
+                configProfile: codexConfigProfile
+            )
         case .claude:
             return try await claudeController.openStock(appURL: appURL)
         }
+    }
+
+    public func closeOfficialCodex(appURL: URL) async throws -> CodexCloseOutcome {
+        try await codexController.closeStock(codexAppURL: appURL)
     }
 
     public func validateApp(

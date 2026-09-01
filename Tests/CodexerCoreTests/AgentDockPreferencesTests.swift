@@ -57,4 +57,21 @@ final class AgentDockPreferencesTests: XCTestCase {
         store.clearLegacyDefaultCodexConfigProfile()
         XCTAssertNil(store.legacyDefaultCodexConfigProfile())
     }
+
+    func testOfficialCodexProviderSettingsPersistSeparately() throws {
+        let store = AgentDockPreferencesStore(defaults: defaults)
+        let ollama = try CodexConfigProfile(validating: "ollama")
+        let expected = OfficialCodexProfileSettings(
+            launchSelection: .named(ollama),
+            defaultConfigProfile: ollama
+        )
+
+        store.saveOfficialCodexProfileSettings(expected)
+
+        XCTAssertEqual(store.loadOfficialCodexProfileSettings(), expected)
+        XCTAssertEqual(store.load(), .defaults)
+
+        store.restoreDefaults()
+        XCTAssertEqual(store.loadOfficialCodexProfileSettings(), .defaults)
+    }
 }

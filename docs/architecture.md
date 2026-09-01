@@ -100,10 +100,11 @@ Managed Codex profiles receive separate `CODEX_HOME` and Electron user-data
 directories. Managed Claude profiles receive separate `UserData` roots through
 the verified `CLAUDE_USER_DATA_DIR` launch contract.
 
-Codex launch-profile selection and its default are both profile-local metadata.
-`Use Default`, explicit Built-in Codex, and a named config profile are
-distinct persisted states, so changing the default does not erase an explicit
-built-in override.
+Codex launch-profile selection and its default are account-local metadata for
+every managed profile and the official account. `Use Default`, explicit
+Built-in Codex, and a named config profile are distinct persisted states, so
+changing one account never changes another and changing the default does not
+erase an explicit built-in override.
 
 Isolation covers supported provider configuration, authentication state, local
 browser state, and profile data. It does not change `HOME` and is not a macOS

@@ -33,13 +33,13 @@ private struct ProfileOverview: View {
           header
 
           if profile.product == .codex {
-            CodexConfigProfileCard(profile: profile)
-              .padding(.top, 18)
-
             UsageLimitsCard(
               limits: model.rateLimits(for: profile), accent: Color(hex: profile.iconColor)
             )
-            .padding(.top, 16)
+            .padding(.top, 18)
+
+            CodexConfigProfileCard(profile: profile)
+              .padding(.top, 10)
           } else {
             UsageLimitsCard(
               limits: model.rateLimits(for: profile),
@@ -244,73 +244,111 @@ private struct CodexConfigProfileCard: View {
   let profile: CodexProfile
 
   var body: some View {
-    let running = model.instanceStatus(for: profile).isRunning
-    VStack(alignment: .leading, spacing: 12) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 3) {
-          Text("Provider Profile")
-            .font(.system(size: 14, weight: .semibold))
-          Text(running
-            ? "Changing the selection restarts this Codex profile."
-            : "The selection is applied the next time this profile opens.")
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+    CompactCodexProviderProfileCard(
+      scopeName: profile.name,
+      discoveryDescription: "this profile's CODEX_HOME",
+      selection: profile.codexLaunchProfileSelection,
+      defaultProfile: profile.codexDefaultConfigProfile,
+      availableProfiles: model.codexConfigProfiles(for: profile),
+      isRunning: model.instanceStatus(for: profile).isRunning,
+      isBusy: model.isBusy(profile) || model.storeMutationInProgress,
+      onSelect: { model.setCodexLaunchProfileSelection($0, for: profile) },
+      onMakeDefault: { model.setDefaultCodexConfigProfile($0, for: profile) }
+    )
+  }
+}
+
+private struct OfficialCodexConfigProfileCard: View {
+  @EnvironmentObject private var model: CodexerModel
+
+  var body: some View {
+    CompactCodexProviderProfileCard(
+      scopeName: "Official Codex",
+      discoveryDescription: "the official ~/.codex home",
+      selection: model.officialCodexProfileSettings.launchSelection,
+      defaultProfile: model.officialCodexProfileSettings.defaultConfigProfile,
+      availableProfiles: model.officialCodexConfigProfiles,
+      isRunning: model.stockInstanceStatuses[.codex]?.isRunning == true,
+      isBusy: model.busyStockProducts.contains(.codex),
+      onSelect: model.setOfficialCodexLaunchProfileSelection,
+      onMakeDefault: model.setOfficialCodexDefaultConfigProfile
+    )
+  }
+}
+
+private struct CompactCodexProviderProfileCard: View {
+  let scopeName: String
+  let discoveryDescription: String
+  let selection: CodexLaunchProfileSelection
+  let defaultProfile: CodexConfigProfile?
+  let availableProfiles: [CodexConfigProfile]
+  let isRunning: Bool
+  let isBusy: Bool
+  let onSelect: (CodexLaunchProfileSelection) -> Void
+  let onMakeDefault: (CodexConfigProfile?) -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      HStack(spacing: 10) {
+        Label("Provider", systemImage: "switch.2")
+          .font(.system(size: 13, weight: .semibold))
+
+        Spacer(minLength: 8)
+
         Picker("Provider Profile", selection: selectionBinding) {
           Text(defaultLabel).tag(CodexLaunchProfileSelection.useDefault)
           Text("Built-in Codex (OAuth)").tag(CodexLaunchProfileSelection.builtIn)
-          ForEach(availableProfiles) { configProfile in
+          ForEach(profilesIncludingSelection) { configProfile in
             Text(configProfile.displayName).tag(CodexLaunchProfileSelection.named(configProfile))
           }
         }
         .labelsHidden()
-        .frame(width: 230)
-        .disabled(model.isBusy(profile) || model.storeMutationInProgress)
+        .frame(width: 220)
+        .disabled(isBusy)
 
         Button {
-          model.setDefaultCodexConfigProfile(effectiveProfile, for: profile)
+          onMakeDefault(effectiveProfile)
         } label: {
           Label(isDefault ? "Default" : "Make Default", systemImage: isDefault
             ? "checkmark.circle.fill" : "circle")
         }
         .buttonStyle(.bordered)
-        .disabled(isDefault || effectiveProfileIsUnavailable || model.storeMutationInProgress)
-        .help("Use this provider profile as the default for \(profile.name)")
+        .controlSize(.small)
+        .disabled(isDefault || effectiveProfileIsUnavailable || isBusy)
+        .help("Use this provider profile as the default for \(scopeName)")
       }
 
       if effectiveProfileIsUnavailable {
         Label(
-          "This named profile is not available in this profile's CODEX_HOME. Add its .config.toml file or choose Built-in Codex.",
+          "This provider profile is unavailable in \(discoveryDescription).",
           systemImage: "exclamationmark.triangle"
         )
-        .font(.system(size: 11))
+        .font(.system(size: 10.5))
         .foregroundStyle(.orange)
       } else {
-        Text(effectiveProfile == nil
-          ? "Built-in Codex uses the bundled CLI and the profile's normal Codex sign-in."
-          : "Named profiles are discovered only from this profile's CODEX_HOME and applied to its desktop app-server launch.")
-          .font(.system(size: 11))
+        Text(statusDescription)
+          .font(.system(size: 10.5))
           .foregroundStyle(.secondary)
       }
     }
-    .padding(16)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 9)
     .background { OverviewSurfaceCard(cornerRadius: 8) }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Codex provider profile")
   }
 
   private var selectionBinding: Binding<CodexLaunchProfileSelection> {
-    Binding(
-      get: { profile.codexLaunchProfileSelection },
-      set: { model.setCodexLaunchProfileSelection($0, for: profile) }
-    )
+    Binding(get: { selection }, set: { onSelect($0) })
   }
 
-  private var availableProfiles: [CodexConfigProfile] {
-    var profiles = model.codexConfigProfiles(for: profile)
-    if case let .named(selected) = profile.codexLaunchProfileSelection,
-       !profiles.contains(selected) {
+  private var defaultLabel: String {
+    "Use Default (\(defaultProfile?.displayName ?? "Built-in Codex"))"
+  }
+
+  private var profilesIncludingSelection: [CodexConfigProfile] {
+    var profiles = availableProfiles
+    if case let .named(selected) = selection, !profiles.contains(selected) {
       profiles.append(selected)
     }
     return profiles.sorted {
@@ -319,20 +357,30 @@ private struct CodexConfigProfileCard: View {
   }
 
   private var effectiveProfile: CodexConfigProfile? {
-    model.effectiveCodexConfigProfile(for: profile)
+    switch selection {
+    case .useDefault: defaultProfile
+    case .builtIn: nil
+    case let .named(configProfile): configProfile
+    }
   }
 
   private var effectiveProfileIsUnavailable: Bool {
     guard let effectiveProfile else { return false }
-    return !model.codexConfigProfiles(for: profile).contains(effectiveProfile)
+    return !availableProfiles.contains(effectiveProfile)
   }
 
   private var isDefault: Bool {
-    effectiveProfile == profile.codexDefaultConfigProfile
+    effectiveProfile == defaultProfile
   }
 
-  private var defaultLabel: String {
-    "Use Default (\(profile.codexDefaultConfigProfile?.displayName ?? "Built-in Codex"))"
+  private var statusDescription: String {
+    let source: String
+    if let effectiveProfile {
+      source = "\(effectiveProfile.displayName) from \(discoveryDescription)"
+    } else {
+      source = "Built-in OAuth"
+    }
+    return isRunning ? "\(source) · Changing it restarts only this account." : source
   }
 }
 
@@ -368,6 +416,7 @@ private struct OfficialOverview: View {
 
         if product == .codex {
           UsageLimitsCard(limits: model.officialCodexRateLimits, accent: AgentDockPalette.blue)
+          OfficialCodexConfigProfileCard()
           UsageActivityCard(
             product: product,
             stats: model.officialCodexStats,

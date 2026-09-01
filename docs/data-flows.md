@@ -13,7 +13,8 @@
 5. AgentDock resolves the persisted Codex launch selection to that managed
    profile's own default, Built-in Codex, or a safe profile-local
    `<name>.config.toml`. Named profiles are translated into bounded `--config`
-   overrides accepted by the desktop app-server command.
+   overrides accepted by the desktop app-server command. The official account
+   follows the same flow against `~/.codex`.
 6. AgentDock starts a new provider instance with the profile-specific local
    state contract.
 7. Post-launch discovery verifies the returned process before the UI marks the

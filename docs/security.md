@@ -66,9 +66,10 @@ not trust inherited profile-selection values. Built-in launches set
 `CODEX_CLI_PATH` to the validated Codex app's bundled
 `Contents/Resources/codex` executable. Named config-profile launches point it
 to AgentDock's signed proxy, which validates the profile-local bounded regular
-file, converts its TOML assignments to `--config` arguments accepted by the
-desktop app-server, and then executes that same bundled CLI. Managed launches
-set the selected profile's exact `CODEX_HOME`; stock launches remove
+`<name>.config.toml`, converts its assignments to `--config` arguments accepted
+by the desktop app-server, and then executes that same bundled CLI. Managed
+named-profile launches set the managed profile's exact `CODEX_HOME`; official
+named-profile launches set `~/.codex`; built-in stock launches remove
 `CODEX_HOME`. User-selected executables cannot replace the bundled CLI through
 AgentDock's parent environment. Settings that would place bearer tokens, API
 keys, or direct HTTP headers in process arguments are rejected; custom

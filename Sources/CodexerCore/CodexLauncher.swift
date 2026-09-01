@@ -372,11 +372,19 @@ public enum CodexInstanceDiscovery {
 
 public protocol CodexWorkspaceLaunching: Sendable {
     func launch(configuration: IsolatedCodexLaunchConfiguration) async throws -> Int32
-    func launchStock(codexAppURL: URL) async throws -> Int32
+    func launchStock(
+        codexAppURL: URL,
+        codexHomeURL: URL,
+        configProfile: CodexConfigProfile?
+    ) async throws -> Int32
 }
 
 public extension CodexWorkspaceLaunching {
-    func launchStock(codexAppURL _: URL) async throws -> Int32 {
+    func launchStock(
+        codexAppURL _: URL,
+        codexHomeURL _: URL,
+        configProfile _: CodexConfigProfile?
+    ) async throws -> Int32 {
         throw CodexLauncherError.launchDidNotReturnProcess
     }
 }
@@ -450,7 +458,14 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
         return processID
     }
 
-    public func launchStock(codexAppURL: URL) async throws -> Int32 {
+    public func launchStock(
+        codexAppURL: URL,
+        codexHomeURL: URL,
+        configProfile: CodexConfigProfile?
+    ) async throws -> Int32 {
+        if configProfile != nil, profileProxyURL == nil {
+            throw CodexLauncherError.profileProxyMissing
+        }
         let openConfiguration = NSWorkspace.OpenConfiguration()
         openConfiguration.activates = true
         openConfiguration.addsToRecentItems = false
@@ -459,7 +474,9 @@ public struct SystemCodexWorkspaceLauncher: CodexWorkspaceLaunching {
         openConfiguration.environment = Self.launchEnvironment(
             inheriting: ProcessInfo.processInfo.environment,
             codexAppURL: codexAppURL,
-            codexHomePath: nil
+            codexHomePath: configProfile == nil ? nil : codexHomeURL.path,
+            configProfile: configProfile,
+            profileProxyURL: profileProxyURL
         )
 
         let application = try await NSWorkspace.shared.openApplication(
@@ -497,6 +514,7 @@ public protocol CodexApplicationLifecycleControlling: Sendable {
         configuration: IsolatedCodexLaunchConfiguration
     )
     func focusStock(processID: Int32, codexAppURL: URL) -> Bool
+    func terminateStock(processID: Int32, codexAppURL: URL) -> Bool
     func isVerifiedStockRunning(processID: Int32, codexAppURL: URL) -> Bool
     func invalidateUnverifiedStockLaunch(processID: Int32, codexAppURL: URL)
 }
@@ -526,6 +544,8 @@ public extension CodexApplicationLifecycleControlling {
     ) {}
 
     func focusStock(processID _: Int32, codexAppURL _: URL) -> Bool { false }
+
+    func terminateStock(processID _: Int32, codexAppURL _: URL) -> Bool { false }
 
     func isVerifiedStockRunning(processID: Int32, codexAppURL _: URL) -> Bool {
         isRunning(processID: processID)
@@ -643,6 +663,16 @@ public struct SystemCodexApplicationLifecycleController: CodexApplicationLifecyc
         }
         sendReopenEvent(to: processID)
         return application.activate(options: [.activateAllWindows])
+    }
+
+    public func terminateStock(processID: Int32, codexAppURL: URL) -> Bool {
+        guard let application = officialMainApplication(
+            processID: processID,
+            codexAppURL: codexAppURL
+        ), isStockProcess(processID: processID, codexAppURL: codexAppURL) else {
+            return false
+        }
+        return application.terminate()
     }
 
     public func isVerifiedStockRunning(processID: Int32, codexAppURL: URL) -> Bool {
@@ -891,8 +921,17 @@ public actor CodexInstanceController {
         try await open(configuration: IsolatedCodexLaunchConfiguration(profile: profile, codexAppURL: codexAppURL))
     }
 
-    public func openStock(codexAppURL: URL) async throws -> CodexOpenOutcome {
+    public func openStock(
+        codexAppURL: URL,
+        codexHomeURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true),
+        configProfile: CodexConfigProfile? = nil
+    ) async throws -> CodexOpenOutcome {
         try validator.validateCodexApp(at: codexAppURL)
+
+        if let configProfile {
+            try configProfile.validate(in: codexHomeURL)
+        }
 
         if let processID = try stockStatus(codexAppURL: codexAppURL).primaryProcessID {
             guard lifecycleController.focusStock(
@@ -905,7 +944,11 @@ public actor CodexInstanceController {
         }
 
         try validator.validateCodexApp(at: codexAppURL)
-        let processID = try await workspaceLauncher.launchStock(codexAppURL: codexAppURL)
+        let processID = try await workspaceLauncher.launchStock(
+            codexAppURL: codexAppURL,
+            codexHomeURL: codexHomeURL,
+            configProfile: configProfile
+        )
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: launchValidationTimeout)
         do {
@@ -938,6 +981,33 @@ public actor CodexInstanceController {
             codexAppURL: codexAppURL
         )
         throw CodexLauncherError.launchedProcessFailedValidation(processID)
+    }
+
+    public func closeStock(codexAppURL: URL) async throws -> CodexCloseOutcome {
+        try validator.validateCodexApp(at: codexAppURL)
+        let processIDs = try stockStatus(codexAppURL: codexAppURL).processIDs
+        guard !processIDs.isEmpty else { return .alreadyStopped }
+        for processID in processIDs {
+            guard lifecycleController.terminateStock(
+                processID: processID,
+                codexAppURL: codexAppURL
+            ) else {
+                throw CodexLauncherError.couldNotTerminate(processID)
+            }
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: closeTimeout)
+        while clock.now < deadline {
+            try Task.checkCancellation()
+            if try stockStatus(codexAppURL: codexAppURL).processIDs.isEmpty {
+                return .closed(processIDs: processIDs)
+            }
+            try await clock.sleep(for: closePollInterval)
+        }
+        throw CodexLauncherError.closeTimedOut(
+            try stockStatus(codexAppURL: codexAppURL).processIDs
+        )
     }
 
     public func open(
