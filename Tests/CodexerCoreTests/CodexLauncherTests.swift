@@ -252,6 +252,56 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertTrue(profileConfigurations.isEmpty)
     }
 
+    func testOpenStockLaunchesOfficialHomeWithSelectedNativeProfile() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OfficialCodexHome-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Data("model_provider = \"ollama\"\n".utf8)
+            .write(to: home.appendingPathComponent("ollama.config.toml"))
+        let ollama = try CodexConfigProfile(validating: "ollama")
+        let launcher = RecordingWorkspaceLauncher(processID: 742)
+        let lifecycle = RecordingLifecycleController(running: [742])
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
+            workspaceLauncher: launcher,
+            lifecycleController: lifecycle
+        )
+
+        let outcome = try await controller.openStock(
+            codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app"),
+            codexHomeURL: home,
+            configProfile: ollama
+        )
+
+        XCTAssertEqual(outcome, .launched(processID: 742))
+        let selectedProfiles = await launcher.stockConfigProfiles()
+        XCTAssertEqual(selectedProfiles, [ollama])
+    }
+
+    func testCloseStockTerminatesOnlyVerifiedOfficialInstance() async throws {
+        let appURL = URL(fileURLWithPath: "/Applications/Codex.app")
+        let executable = IsolatedCodexLaunchConfiguration.appExecutableURL(for: appURL).path
+        let snapshots = SequencedProcessSnapshotProvider([
+            "811 \(executable)",
+            ""
+        ])
+        let lifecycle = RecordingLifecycleController(running: [811])
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: snapshots,
+            lifecycleController: lifecycle,
+            closeTimeout: .seconds(1),
+            closePollInterval: .milliseconds(10)
+        )
+
+        let outcome = try await controller.closeStock(codexAppURL: appURL)
+
+        XCTAssertEqual(outcome, .closed(processIDs: [811]))
+        XCTAssertEqual(lifecycle.terminatedStockProcessIDs, [811])
+    }
+
     func testOpenLaunchesNewInstanceWithIsolatedConfiguration() async throws {
         let profile = makeProfile(slug: "work")
         try prepareIsolationLayout(for: profile)
@@ -1085,10 +1135,27 @@ private struct FixedProcessSnapshotProvider: CodexProcessSnapshotProviding {
     }
 }
 
+private final class SequencedProcessSnapshotProvider: CodexProcessSnapshotProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var snapshots: [String]
+
+    init(_ snapshots: [String]) {
+        self.snapshots = snapshots
+    }
+
+    func processSnapshot() throws -> String {
+        lock.withLock {
+            guard snapshots.count > 1 else { return snapshots.first ?? "" }
+            return snapshots.removeFirst()
+        }
+    }
+}
+
 private actor RecordingWorkspaceLauncher: CodexWorkspaceLaunching {
     private let processID: Int32
     private var recordedConfigurations: [IsolatedCodexLaunchConfiguration] = []
     private var recordedStockAppURLs: [URL] = []
+    private var recordedStockConfigProfiles: [CodexConfigProfile?] = []
 
     init(processID: Int32) {
         self.processID = processID
@@ -1099,8 +1166,13 @@ private actor RecordingWorkspaceLauncher: CodexWorkspaceLaunching {
         return processID
     }
 
-    func launchStock(codexAppURL: URL) async throws -> Int32 {
+    func launchStock(
+        codexAppURL: URL,
+        codexHomeURL _: URL,
+        configProfile: CodexConfigProfile?
+    ) async throws -> Int32 {
         recordedStockAppURLs.append(codexAppURL)
+        recordedStockConfigProfiles.append(configProfile)
         return processID
     }
 
@@ -1115,6 +1187,10 @@ private actor RecordingWorkspaceLauncher: CodexWorkspaceLaunching {
     func stockAppURLs() -> [URL] {
         recordedStockAppURLs
     }
+
+    func stockConfigProfiles() -> [CodexConfigProfile?] {
+        recordedStockConfigProfiles
+    }
 }
 
 private final class RecordingLifecycleController: CodexApplicationLifecycleControlling, @unchecked Sendable {
@@ -1124,6 +1200,7 @@ private final class RecordingLifecycleController: CodexApplicationLifecycleContr
     private let verifiesProfileProcesses: Bool
     private(set) var focusedProcessIDs: [Int32] = []
     private(set) var focusedStockProcessIDs: [Int32] = []
+    private(set) var terminatedStockProcessIDs: [Int32] = []
     private(set) var terminatedProcessIDs: [Int32] = []
 
     init(
@@ -1150,6 +1227,17 @@ private final class RecordingLifecycleController: CodexApplicationLifecycleContr
         lock.withLock {
             focusedStockProcessIDs.append(processID)
             return runningProcessIDs.contains(processID)
+        }
+    }
+
+    func terminateStock(processID: Int32, codexAppURL _: URL) -> Bool {
+        lock.withLock {
+            guard runningProcessIDs.contains(processID) else { return false }
+            if removesOnTerminate {
+                runningProcessIDs.remove(processID)
+            }
+            terminatedStockProcessIDs.append(processID)
+            return true
         }
     }
 

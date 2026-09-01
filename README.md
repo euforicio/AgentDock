@@ -83,12 +83,13 @@ release procedures.
 5. Optionally choose **Install Shortcut** for a Dock-pinnable launcher.
 6. Repeat for another account or provider.
 
-For Codex, the profile Overview discovers named configuration files at
-`CODEX_HOME/<name>.config.toml`. Choose **Use Default**, **Built-in Codex
-(OAuth)**, or a named profile. **Make Default** changes the provider default
-only for the selected managed profile. Changing the selection while Codex is
-running closes and reopens only that managed instance with the selected file
-applied as desktop app-server configuration overrides.
+For Codex, the compact Provider row beneath Usage discovers native
+`CODEX_HOME/<name>.config.toml` profiles for that account. Choose **Use
+Default**, **Built-in Codex (OAuth)**, or a named profile such as Ollama.
+**Make Default** changes the provider default only for the selected managed or
+official account. Changing the selection while Codex is running closes and
+reopens only that account with the selected profile applied as desktop
+app-server configuration overrides.
 
 Drag managed profiles within their provider section to keep the sidebar in the
 order you prefer. The order persists across launches; official provider rows

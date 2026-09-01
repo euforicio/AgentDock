@@ -316,6 +316,64 @@ final class CodexerModelTests: XCTestCase {
         XCTAssertEqual(stockOpenCount, 1)
     }
 
+    func testOfficialCodexUsesNativeProfileAndKeepsManagedDefaultsIsolated() async throws {
+        let store = try makeStore()
+        let managed = try store.createProfile(name: "Managed")
+        let officialHome = root.appendingPathComponent("OfficialCodex", isDirectory: true)
+        try FileManager.default.createDirectory(at: officialHome, withIntermediateDirectories: true)
+        try Data(#"""
+        [model_providers.ollama]
+        name = "Ollama"
+        base_url = "http://127.0.0.1:11434/v1"
+
+        """#.utf8).write(to: officialHome.appendingPathComponent("config.toml"))
+        try Data(#"""
+        model_provider = "ollama"
+        model = "local-model"
+        """#.utf8).write(to: officialHome.appendingPathComponent("ollama.config.toml"))
+        let suiteName = "OfficialCodexProfileSettings.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferencesStore = AgentDockPreferencesStore(defaults: defaults)
+        let manager = RecordingInstanceManager(stockRunning: true)
+        let model = CodexerModel(
+            store: store,
+            codexAppURL: URL(fileURLWithPath: "/Applications/Codex.app"),
+            instanceController: manager,
+            shortcutInstaller: NoopShortcutManager(),
+            statsScanner: FixedStatsScanner(),
+            rateLimitClient: FixedRateLimitClient(),
+            preferencesStore: preferencesStore,
+            officialCodexHomeURL: officialHome
+        )
+        let ollama = try XCTUnwrap(model.officialCodexConfigProfiles.first)
+
+        model.openStockCodex()
+        await waitUntil { !model.busyStockProducts.contains(.codex) }
+        model.setOfficialCodexDefaultConfigProfile(ollama)
+        await waitUntil { !model.busyStockProducts.contains(.codex) }
+
+        XCTAssertEqual(model.effectiveOfficialCodexConfigProfile, ollama)
+        XCTAssertEqual(
+            preferencesStore.loadOfficialCodexProfileSettings().defaultConfigProfile,
+            ollama
+        )
+        XCTAssertNil(store.profiles.first(where: { $0.id == managed.id })?.codexDefaultConfigProfile)
+        let firstCloseCount = await manager.stockCloseCount()
+        let firstOpenedProfiles = await manager.openedStockConfigProfiles()
+        XCTAssertEqual(firstCloseCount, 1)
+        XCTAssertEqual(firstOpenedProfiles, [nil, ollama])
+
+        model.setOfficialCodexLaunchProfileSelection(.builtIn)
+        await waitUntil { !model.busyStockProducts.contains(.codex) }
+
+        XCTAssertNil(model.effectiveOfficialCodexConfigProfile)
+        let finalCloseCount = await manager.stockCloseCount()
+        let finalOpenedProfiles = await manager.openedStockConfigProfiles()
+        XCTAssertEqual(finalCloseCount, 2)
+        XCTAssertEqual(finalOpenedProfiles, [nil, ollama, nil])
+    }
+
     func testClaudeSelectionAndAppPathRemainProductScoped() throws {
         let store = try makeStore()
         let profile = try store.createProfile(product: .claude, name: "Personal")
@@ -764,10 +822,18 @@ private actor RecordingInstanceManager: DesktopInstanceManaging {
     private let openDelay: Duration?
     private var opened: [CodexProfile.ID] = []
     private var stockOpens = 0
+    private var stockCloses = 0
+    private var stockConfigProfiles: [CodexConfigProfile?] = []
+    private let stockRunning: Bool
 
-    init(openShouldFail: Bool = false, openDelay: Duration? = nil) {
+    init(
+        openShouldFail: Bool = false,
+        openDelay: Duration? = nil,
+        stockRunning: Bool = false
+    ) {
         self.openShouldFail = openShouldFail
         self.openDelay = openDelay
+        self.stockRunning = stockRunning
     }
 
     func statuses(
@@ -796,15 +862,23 @@ private actor RecordingInstanceManager: DesktopInstanceManaging {
         product _: DesktopProduct,
         appURL _: URL
     ) async throws -> CodexInstanceStatus {
-        CodexInstanceStatus()
+        CodexInstanceStatus(processIDs: stockRunning ? [456] : [])
     }
 
     func openStock(
         product _: DesktopProduct,
-        appURL _: URL
+        appURL _: URL,
+        codexHomeURL _: URL?,
+        codexConfigProfile: CodexConfigProfile?
     ) async throws -> CodexOpenOutcome {
         stockOpens += 1
+        stockConfigProfiles.append(codexConfigProfile)
         return .launched(processID: 456)
+    }
+
+    func closeOfficialCodex(appURL _: URL) async throws -> CodexCloseOutcome {
+        stockCloses += 1
+        return .closed(processIDs: [456])
     }
 
     func validateApp(product _: DesktopProduct, at _: URL) async throws {}
@@ -815,6 +889,14 @@ private actor RecordingInstanceManager: DesktopInstanceManaging {
 
     func stockOpenCount() -> Int {
         stockOpens
+    }
+
+    func stockCloseCount() -> Int {
+        stockCloses
+    }
+
+    func openedStockConfigProfiles() -> [CodexConfigProfile?] {
+        stockConfigProfiles
     }
 }
 

@@ -8,7 +8,12 @@ public protocol CodexInstanceManaging: Sendable {
     func open(profile: CodexProfile, codexAppURL: URL) async throws -> CodexOpenOutcome
     func close(profile: CodexProfile, codexAppURL: URL) async throws -> CodexCloseOutcome
     func stockStatus(codexAppURL: URL) async throws -> CodexInstanceStatus
-    func openStock(codexAppURL: URL) async throws -> CodexOpenOutcome
+    func openStock(
+        codexAppURL: URL,
+        codexHomeURL: URL,
+        configProfile: CodexConfigProfile?
+    ) async throws -> CodexOpenOutcome
+    func closeStock(codexAppURL: URL) async throws -> CodexCloseOutcome
     func validateCodexApp(at url: URL) async throws
 }
 
@@ -27,8 +32,11 @@ public protocol DesktopInstanceManaging: Sendable {
     ) async throws -> CodexInstanceStatus
     func openStock(
         product: DesktopProduct,
-        appURL: URL
+        appURL: URL,
+        codexHomeURL: URL?,
+        codexConfigProfile: CodexConfigProfile?
     ) async throws -> CodexOpenOutcome
+    func closeOfficialCodex(appURL: URL) async throws -> CodexCloseOutcome
     func validateApp(product: DesktopProduct, at url: URL) async throws
 }
 
@@ -50,6 +58,21 @@ extension ProfileStatsScanner: ProfileStatsScanning {}
 public protocol ProfileRateLimitFetching: Sendable {
     func fetchRateLimits(for profile: CodexProfile, codexAppURL: URL) async -> ProfileRateLimits
     func fetchRateLimits(codexHomeURL: URL, codexAppURL: URL) async -> ProfileRateLimits
+    func fetchRateLimits(
+        codexHomeURL: URL,
+        codexAppURL: URL,
+        configProfile: CodexConfigProfile?
+    ) async -> ProfileRateLimits
+}
+
+public extension ProfileRateLimitFetching {
+    func fetchRateLimits(
+        codexHomeURL: URL,
+        codexAppURL: URL,
+        configProfile _: CodexConfigProfile?
+    ) async -> ProfileRateLimits {
+        await fetchRateLimits(codexHomeURL: codexHomeURL, codexAppURL: codexAppURL)
+    }
 }
 
 extension AppServerRateLimitClient: ProfileRateLimitFetching {}

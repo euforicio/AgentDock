@@ -49,6 +49,7 @@ final class CodexerModel: ObservableObject {
             configureProfileActivityRefresh()
         }
     }
+    @Published private(set) var officialCodexProfileSettings: OfficialCodexProfileSettings
     @Published private(set) var profileStats: [CodexProfile.ID: ProfileStats] = [:]
     @Published private(set) var statsLoadingProfileIDs: Set<CodexProfile.ID> = []
     @Published private(set) var profileRateLimits: [CodexProfile.ID: ProfileRateLimits] = [:]
@@ -90,8 +91,7 @@ final class CodexerModel: ObservableObject {
     private var chatTranscriptCursor: LocalChatTranscriptCursor?
     private var loadedChatSelection: CodexerSidebarSelection?
     private var appliedInitialDefaultView = false
-    private let officialCodexHomeURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".codex", isDirectory: true)
+    private let officialCodexHomeURL: URL
     private let officialClaudeUserDataURL = FileManager.default.urls(
         for: .applicationSupportDirectory,
         in: .userDomainMask
@@ -103,6 +103,9 @@ final class CodexerModel: ObservableObject {
         let preferencesStore = AgentDockPreferencesStore()
         self.preferencesStore = preferencesStore
         preferences = preferencesStore.load()
+        officialCodexProfileSettings = preferencesStore.loadOfficialCodexProfileSettings()
+        officialCodexHomeURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
         chatScanner = LocalChatScanner()
         instanceController = DesktopInstanceController()
         shortcutInstaller = ShortcutInstaller()
@@ -194,10 +197,14 @@ final class CodexerModel: ObservableObject {
         claudeUsageClient: any ClaudeUsageFetching = ClaudeUsageClient(),
         preferencesStore: AgentDockPreferencesStore = AgentDockPreferencesStore(),
         chatScanner: LocalChatScanner = LocalChatScanner(),
+        officialCodexHomeURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true),
         startMonitoring: Bool = false
     ) {
         self.preferencesStore = preferencesStore
         preferences = preferencesStore.load()
+        officialCodexProfileSettings = preferencesStore.loadOfficialCodexProfileSettings()
+        self.officialCodexHomeURL = officialCodexHomeURL
         self.chatScanner = chatScanner
         self.store = store
         appURLs = [.codex: codexAppURL, .claude: claudeAppURL]
@@ -539,13 +546,15 @@ final class CodexerModel: ObservableObject {
         let officialHomeURL = officialCodexHomeURL
         let officialClaudeCodeHomeURL = officialClaudeCodeHomeURL
         let officialClaudeUserDataURL = officialClaudeUserDataURL
+        let officialConfigProfile = effectiveOfficialCodexConfigProfile
 
         rateLimitRefreshTask = Task { [weak self] in
             let officialWorker = Task.detached(priority: .utility) {
                 replaceAll
                     ? await client.fetchRateLimits(
                         codexHomeURL: officialHomeURL,
-                        codexAppURL: appURL
+                        codexAppURL: appURL,
+                        configProfile: officialConfigProfile
                     )
                     : nil
             }
@@ -949,6 +958,8 @@ final class CodexerModel: ObservableObject {
         guard !busyStockProducts.contains(product) else { return }
         busyStockProducts.insert(product)
         let appURL = appURL(for: product)
+        let configProfile = product == .codex ? effectiveOfficialCodexConfigProfile : nil
+        let codexHomeURL = product == .codex ? officialCodexHomeURL : nil
 
         Task { [weak self] in
             guard let self else { return }
@@ -956,7 +967,9 @@ final class CodexerModel: ObservableObject {
             do {
                 _ = try await instanceController.openStock(
                     product: product,
-                    appURL: appURL
+                    appURL: appURL,
+                    codexHomeURL: codexHomeURL,
+                    codexConfigProfile: configProfile
                 )
                 errorMessage = nil
                 ProductAnalytics.shared.capture(AnalyticsEvent(
@@ -1511,6 +1524,100 @@ final class CodexerModel: ObservableObject {
     func restorePreferences() {
         preferencesStore.restoreDefaults()
         preferences = .defaults
+        officialCodexProfileSettings = .defaults
+        refreshRateLimits()
+    }
+
+    var officialCodexConfigProfiles: [CodexConfigProfile] {
+        CodexConfigProfile.discover(in: officialCodexHomeURL)
+    }
+
+    var effectiveOfficialCodexConfigProfile: CodexConfigProfile? {
+        switch officialCodexProfileSettings.launchSelection {
+        case .useDefault:
+            officialCodexProfileSettings.defaultConfigProfile
+        case .builtIn:
+            nil
+        case let .named(configProfile):
+            configProfile
+        }
+    }
+
+    func setOfficialCodexDefaultConfigProfile(_ configProfile: CodexConfigProfile?) {
+        guard configProfile != officialCodexProfileSettings.defaultConfigProfile else { return }
+        if let configProfile {
+            do {
+                try configProfile.validate(in: officialCodexHomeURL)
+            } catch {
+                present(error, code: .invalidConfiguration, provider: .codex, action: .configured)
+                return
+            }
+        }
+        var updated = officialCodexProfileSettings
+        updated.defaultConfigProfile = configProfile
+        applyOfficialCodexProfileSettings(
+            updated,
+            restart: updated.launchSelection == .useDefault
+                && stockInstanceStatuses[.codex]?.isRunning == true
+        )
+    }
+
+    func setOfficialCodexLaunchProfileSelection(_ selection: CodexLaunchProfileSelection) {
+        guard selection != officialCodexProfileSettings.launchSelection else { return }
+        let resolvedSelection = Self.resolvedCodexLaunchSelection(
+            selection,
+            defaultProfile: officialCodexProfileSettings.defaultConfigProfile
+        )
+        if case let .named(configProfile) = resolvedSelection {
+            do {
+                try configProfile.validate(in: officialCodexHomeURL)
+            } catch {
+                present(error, code: .invalidConfiguration, provider: .codex, action: .configured)
+                return
+            }
+        }
+        var updated = officialCodexProfileSettings
+        updated.launchSelection = selection
+        applyOfficialCodexProfileSettings(
+            updated,
+            restart: stockInstanceStatuses[.codex]?.isRunning == true
+        )
+    }
+
+    private func applyOfficialCodexProfileSettings(
+        _ settings: OfficialCodexProfileSettings,
+        restart: Bool
+    ) {
+        guard !busyStockProducts.contains(.codex) else { return }
+        officialCodexProfileSettings = settings
+        preferencesStore.saveOfficialCodexProfileSettings(settings)
+        refreshRateLimits()
+        guard restart else {
+            errorMessage = nil
+            return
+        }
+
+        busyStockProducts.insert(.codex)
+        let appURL = appURL(for: .codex)
+        let configProfile = effectiveOfficialCodexConfigProfile
+        let homeURL = officialCodexHomeURL
+        Task { [weak self] in
+            guard let self else { return }
+            defer { busyStockProducts.remove(.codex) }
+            do {
+                _ = try await instanceController.closeOfficialCodex(appURL: appURL)
+                _ = try await instanceController.openStock(
+                    product: .codex,
+                    appURL: appURL,
+                    codexHomeURL: homeURL,
+                    codexConfigProfile: configProfile
+                )
+                errorMessage = nil
+            } catch {
+                present(error, code: .launchFailed, provider: .codex, action: .configured)
+            }
+            await refreshInstanceStatuses()
+        }
     }
 
     func codexConfigProfiles(for profile: CodexProfile) -> [CodexConfigProfile] {

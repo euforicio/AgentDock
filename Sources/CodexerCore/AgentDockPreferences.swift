@@ -40,6 +40,21 @@ public struct AgentDockPreferences: Equatable, Sendable {
     )
 }
 
+public struct OfficialCodexProfileSettings: Equatable, Sendable {
+    public var launchSelection: CodexLaunchProfileSelection
+    public var defaultConfigProfile: CodexConfigProfile?
+
+    public init(
+        launchSelection: CodexLaunchProfileSelection = .useDefault,
+        defaultConfigProfile: CodexConfigProfile? = nil
+    ) {
+        self.launchSelection = launchSelection
+        self.defaultConfigProfile = defaultConfigProfile
+    }
+
+    public static let defaults = OfficialCodexProfileSettings()
+}
+
 public struct AgentDockPreferencesStore {
     private let defaults: UserDefaults
 
@@ -92,8 +107,49 @@ public struct AgentDockPreferencesStore {
             Key.refreshProfileActivity,
             Key.refreshIntervalMinutes,
             Key.showStatusInProfileList,
+            Key.officialCodexLaunchSelectionKind,
+            Key.officialCodexLaunchSelectionName,
+            Key.officialCodexDefaultConfigProfile,
             Key.legacyDefaultCodexConfigProfile
         ].forEach(defaults.removeObject(forKey:))
+    }
+
+    public func loadOfficialCodexProfileSettings() -> OfficialCodexProfileSettings {
+        let defaultConfigProfile = defaults.string(forKey: Key.officialCodexDefaultConfigProfile)
+            .flatMap { try? CodexConfigProfile(validating: $0) }
+        let launchSelection: CodexLaunchProfileSelection
+        switch defaults.string(forKey: Key.officialCodexLaunchSelectionKind) {
+        case "builtIn":
+            launchSelection = .builtIn
+        case "named":
+            launchSelection = defaults.string(forKey: Key.officialCodexLaunchSelectionName)
+                .flatMap { try? CodexConfigProfile(validating: $0) }
+                .map(CodexLaunchProfileSelection.named) ?? .useDefault
+        default:
+            launchSelection = .useDefault
+        }
+        return OfficialCodexProfileSettings(
+            launchSelection: launchSelection,
+            defaultConfigProfile: defaultConfigProfile
+        )
+    }
+
+    public func saveOfficialCodexProfileSettings(_ settings: OfficialCodexProfileSettings) {
+        switch settings.launchSelection {
+        case .useDefault:
+            defaults.removeObject(forKey: Key.officialCodexLaunchSelectionKind)
+            defaults.removeObject(forKey: Key.officialCodexLaunchSelectionName)
+        case .builtIn:
+            defaults.set("builtIn", forKey: Key.officialCodexLaunchSelectionKind)
+            defaults.removeObject(forKey: Key.officialCodexLaunchSelectionName)
+        case let .named(configProfile):
+            defaults.set("named", forKey: Key.officialCodexLaunchSelectionKind)
+            defaults.set(configProfile.name, forKey: Key.officialCodexLaunchSelectionName)
+        }
+        defaults.set(
+            settings.defaultConfigProfile?.name,
+            forKey: Key.officialCodexDefaultConfigProfile
+        )
     }
 
     public func legacyDefaultCodexConfigProfile() -> CodexConfigProfile? {
@@ -113,6 +169,9 @@ public struct AgentDockPreferencesStore {
         static let refreshProfileActivity = "AgentDock.refreshProfileActivity"
         static let refreshIntervalMinutes = "AgentDock.refreshIntervalMinutes"
         static let showStatusInProfileList = "AgentDock.showStatusInProfileList"
+        static let officialCodexLaunchSelectionKind = "AgentDock.officialCodex.launchSelectionKind"
+        static let officialCodexLaunchSelectionName = "AgentDock.officialCodex.launchSelectionName"
+        static let officialCodexDefaultConfigProfile = "AgentDock.officialCodex.defaultConfigProfile"
         static let legacyDefaultCodexConfigProfile = "AgentDock.defaultCodexConfigProfile"
     }
 }

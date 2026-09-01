@@ -27,11 +27,12 @@ CODEX_HOME=<profile>/CODEX_HOME
 [generated] --config <dotted-key=toml-value> ... app-server
 ```
 
-Named profiles are discovered from `<profile>/CODEX_HOME/<name>.config.toml`.
-AgentDock stores whether each managed profile uses its own default, forces the
-built-in configuration, or selects one named profile. The launch helper reads
-only that managed profile's selected file and translates its bounded TOML
-assignments into app-server-supported `--config` overrides while keeping
+Named profiles are discovered from an account's own
+`CODEX_HOME/<name>.config.toml` files. AgentDock stores whether each managed
+profile and the official account use their own default, force the built-in
+configuration, or select one named profile. The launch helper reads only the
+selected profile file and translates its bounded TOML assignments into
+app-server-supported `--config` overrides while keeping
 `CODEX_CLI_PATH` pinned to AgentDock's bundled proxy and, ultimately, the CLI
 bundled inside the validated Codex app. Codex's `--profile` flag is not used
 because the desktop app-server command rejects it.
