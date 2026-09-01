@@ -144,6 +144,16 @@ struct SettingsView: View {
             }
 
             SettingsSectionHeader("Updates")
+            SettingsRow("Release channel") {
+                Picker("Release Channel", selection: updateChannelBinding) {
+                    ForEach(AppUpdateChannel.allCases) { channel in
+                        Text(channel.displayName).tag(channel)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 150)
+                .disabled(!updater.isConfigured)
+            }
             SettingsRow("AgentDock updates") {
                 Button("Check for Updates…") {
                     updater.checkForUpdates()
@@ -172,7 +182,9 @@ struct SettingsView: View {
             }
             Text(
                 updater.isConfigured
-                    ? "Update preferences are stored by Sparkle. Automatic installation completes when AgentDock can safely relaunch."
+                    ? updater.updateChannel == .alpha
+                        ? "Alpha receives signed prerelease builds after changes merge. They may be less stable; switch back to Stable at any time."
+                        : "Stable is the default and receives signed production releases. Automatic installation completes when AgentDock can safely relaunch."
                     : "Automatic updates are unavailable in this development build."
             )
             .font(.system(size: 11))
@@ -439,6 +451,13 @@ struct SettingsView: View {
         Binding(
             get: { updater.automaticallyChecksForUpdates },
             set: { updater.setAutomaticallyChecksForUpdates($0) }
+        )
+    }
+
+    private var updateChannelBinding: Binding<AppUpdateChannel> {
+        Binding(
+            get: { updater.updateChannel },
+            set: { updater.setUpdateChannel($0) }
         )
     }
 

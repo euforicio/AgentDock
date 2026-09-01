@@ -2,6 +2,21 @@ import XCTest
 @testable import Codexer
 
 final class AppUpdatePresentationTests: XCTestCase {
+    func testStableIsTheDefaultUpdateChannel() {
+        let suiteName = "AppUpdatePresentationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(AppUpdateChannel.saved(in: defaults), .stable)
+        defaults.set("alpha", forKey: AppUpdateChannel.preferenceKey)
+        XCTAssertEqual(AppUpdateChannel.saved(in: defaults), .alpha)
+        defaults.set("nightly", forKey: AppUpdateChannel.preferenceKey)
+        XCTAssertEqual(AppUpdateChannel.saved(in: defaults), .stable)
+        XCTAssertEqual(AppUpdateChannel.allCases.first, .stable)
+        XCTAssertEqual(AppUpdateChannel.stable.feedURL, AppUpdateChannel.stableFeedURL)
+        XCTAssertEqual(AppUpdateChannel.alpha.feedURL, AppUpdateChannel.alphaFeedURL)
+    }
+
     func testUpdateCheckFrequenciesUseSupportedSparkleIntervals() {
         XCTAssertEqual(AppUpdateCheckFrequency.hourly.rawValue, 3_600)
         XCTAssertEqual(AppUpdateCheckFrequency.everySixHours.rawValue, 21_600)

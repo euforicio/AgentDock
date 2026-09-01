@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 
 final class ReleaseWorkflowTests: XCTestCase {
-    func testReleaseWorkflowRunsOnlyForVersionTags() throws {
+    func testReleaseWorkflowRunsForStableTagsAndDispatchedAlphaTags() throws {
         let workflow = try String(contentsOf: repositoryRoot
             .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
         let triggerBlock = try XCTUnwrap(workflow.components(separatedBy: "\npermissions:").first)
@@ -14,6 +14,8 @@ final class ReleaseWorkflowTests: XCTestCase {
           push:
             tags:
               - "v*"
+              - "alpha-*"
+          workflow_dispatch:
 
         """)
     }
@@ -23,9 +25,11 @@ final class ReleaseWorkflowTests: XCTestCase {
             .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
 
         XCTAssertTrue(workflow.contains("  release:\n"))
-        XCTAssertTrue(workflow.contains("  appcast:\n    name: Sign and publish stable appcast last\n    needs: release\n"))
+        XCTAssertTrue(workflow.contains("  appcast:\n    name: Sign and publish selected appcast last\n    needs: [build, release]\n"))
         XCTAssertTrue(workflow.contains("https://github.com/euforicio/AgentDock/releases/download/$GITHUB_REF_NAME/"))
         XCTAssertTrue(workflow.contains("https://euforicio.github.io/AgentDock/appcast.xml"))
+        XCTAssertTrue(workflow.contains("appcast-alpha.xml"))
+        XCTAssertTrue(workflow.contains("--channel alpha"))
         XCTAssertTrue(workflow.contains("cmp -s \"release-input/$archive_name\" \"$archive_dir/$archive_name\""))
         XCTAssertTrue(workflow.contains("Verify public appcast bytes and signature"))
     }
@@ -34,12 +38,32 @@ final class ReleaseWorkflowTests: XCTestCase {
         let workflow = try String(contentsOf: repositoryRoot
             .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
 
-        XCTAssertTrue(workflow.contains("group: agentdock-stable-release"))
+        XCTAssertTrue(workflow.contains("group: agentdock-release"))
         XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$GITHUB_SHA\" origin/main"))
         XCTAssertTrue(workflow.contains("is not the highest version tag"))
         XCTAssertTrue(workflow.contains("public_version=\"$(./script/latest_appcast_version.sh \"$public_appcast\")\""))
         XCTAssertTrue(workflow.contains("Release version $version must be newer than public appcast version"))
         XCTAssertTrue(workflow.contains("runs-on: blacksmith-6vcpu-macos-latest\n    environment: release"))
+        XCTAssertTrue(workflow.contains("Alpha releases must point to the current origin/main commit."))
+        XCTAssertTrue(workflow.contains("prerelease: ${{ needs.build.outputs.channel == 'alpha' }}"))
+        XCTAssertTrue(workflow.contains("make_latest: ${{ needs.build.outputs.channel == 'stable' }}"))
+    }
+
+    func testAlphaPublicationIsDebouncedAfterSuccessfulMainQualityRun() throws {
+        let workflow = try String(contentsOf: repositoryRoot
+            .appendingPathComponent(".github/workflows/alpha-trigger.yml"), encoding: .utf8)
+
+        XCTAssertTrue(workflow.contains("workflow_run:"))
+        XCTAssertTrue(workflow.contains("- Quality"))
+        XCTAssertTrue(workflow.contains("github.event.workflow_run.conclusion == 'success'"))
+        XCTAssertTrue(workflow.contains("github.event.workflow_run.event == 'push'"))
+        XCTAssertTrue(workflow.contains("group: agentdock-alpha-trigger"))
+        XCTAssertTrue(workflow.contains("cancel-in-progress: true"))
+        XCTAssertTrue(workflow.contains("run: sleep 600"))
+        XCTAssertTrue(workflow.contains("git rev-parse origin/main"))
+        XCTAssertTrue(workflow.contains("git push origin \"refs/tags/$tag\""))
+        XCTAssertTrue(workflow.contains("gh workflow run release.yml --repo \"$GITHUB_REPOSITORY\" --ref \"$tag\""))
+        XCTAssertTrue(workflow.contains("actions: write"))
     }
 
     func testAppcastVersionExtractorHandlesSparkleElementAndFailsClosed() throws {

@@ -3,6 +3,35 @@ import Foundation
 import CodexerCore
 import Sparkle
 
+enum AppUpdateChannel: String, CaseIterable, Identifiable {
+    case stable
+    case alpha
+
+    static let preferenceKey = "AgentDockUpdateChannel"
+    static let stableFeedURL = "https://euforicio.github.io/AgentDock/appcast.xml"
+    static let alphaFeedURL = "https://euforicio.github.io/AgentDock/appcast-alpha.xml"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .stable: "Stable"
+        case .alpha: "Alpha"
+        }
+    }
+
+    var feedURL: String {
+        switch self {
+        case .stable: Self.stableFeedURL
+        case .alpha: Self.alphaFeedURL
+        }
+    }
+
+    static func saved(in defaults: UserDefaults) -> Self {
+        defaults.string(forKey: preferenceKey).flatMap(Self.init(rawValue:)) ?? .stable
+    }
+}
+
 enum AppUpdateCheckFrequency: TimeInterval, CaseIterable, Identifiable {
     case hourly = 3_600
     case everySixHours = 21_600
@@ -214,14 +243,18 @@ private final class AppUpdateUserDriver: SPUStandardUserDriver {
 final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate {
     private var updater: SPUUpdater!
     private var userDriver: AppUpdateUserDriver!
+    private let defaults: UserDefaults
     private var standardUpdateWindowIsActive = false
     @Published private(set) var presentation = AppUpdatePresentation.hidden
+    @Published private(set) var updateChannel: AppUpdateChannel
     private(set) var isConfigured: Bool
 
-    init(bundle: Bundle = .main) {
+    init(bundle: Bundle = .main, defaults: UserDefaults = .standard) {
         let feedURL = bundle.object(forInfoDictionaryKey: "SUFeedURL") as? String
         let publicKey = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
         isConfigured = feedURL?.hasPrefix("https://") == true && !(publicKey ?? "").isEmpty
+        self.defaults = defaults
+        updateChannel = AppUpdateChannel.saved(in: defaults)
         super.init()
         userDriver = AppUpdateUserDriver(hostBundle: bundle, delegate: self)
         updater = SPUUpdater(
@@ -249,6 +282,14 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
 
     var updateCheckFrequency: AppUpdateCheckFrequency {
         isConfigured ? .closest(to: updater.updateCheckInterval) : .hourly
+    }
+
+    func feedURLString(for updater: SPUUpdater) -> String? {
+        updateChannel.feedURL
+    }
+
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        updateChannel == .alpha ? [AppUpdateChannel.alpha.rawValue] : []
     }
 
     func checkForUpdates() {
@@ -298,6 +339,20 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, @preconc
         guard isConfigured else { return }
         objectWillChange.send()
         updater.updateCheckInterval = frequency.rawValue
+        ProductAnalytics.shared.capture(AnalyticsEvent(
+            .updateLifecycle,
+            [.action(.updatePreferenceChanged), .trigger(.settings)]
+        ))
+    }
+
+    func setUpdateChannel(_ channel: AppUpdateChannel) {
+        guard channel != updateChannel else { return }
+        updateChannel = channel
+        defaults.set(channel.rawValue, forKey: AppUpdateChannel.preferenceKey)
+        presentation = .hidden
+        if isConfigured {
+            updater.resetUpdateCycleAfterShortDelay()
+        }
         ProductAnalytics.shared.capture(AnalyticsEvent(
             .updateLifecycle,
             [.action(.updatePreferenceChanged), .trigger(.settings)]

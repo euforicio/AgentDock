@@ -77,9 +77,9 @@ the tracked `.icns` and website copy with:
 
 GitHub Pages serves the contents of the `gh-pages` branch. Website publication
 is manual; do not add a push-to-main, pull-request, or dispatch workflow. The
-tag-only release workflow preserves the existing website and publishes only
-the signed `appcast.xml` and `.nojekyll` update metadata after immutable release
-assets are available.
+release workflow preserves the existing website and publishes only the signed
+Stable or Alpha appcast plus `.nojekyll` update metadata after immutable
+release assets are available.
 
 ## Test Suites
 

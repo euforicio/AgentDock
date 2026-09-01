@@ -19,8 +19,8 @@ if [[ -z "$VERSION" ]]; then
   echo "error: missing CFBundleShortVersionString in $INFO_PLIST" >&2
   exit 1
 fi
-if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: CFBundleShortVersionString must use MAJOR.MINOR.PATCH format" >&2
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?$ ]]; then
+  echo "error: CFBundleShortVersionString must use MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-alpha.NUMBER format" >&2
   exit 1
 fi
 RELEASE_NAME="$APP_NAME-$VERSION"

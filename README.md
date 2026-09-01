@@ -62,7 +62,9 @@ settings.
    and stapled for Gatekeeper verification.
 
 AgentDock releases that include Sparkle update themselves from the signed
-stable appcast. Installations from before Sparkle support require this one
+Stable channel by default. Settings also offers an opt-in Alpha channel for
+signed prerelease builds after changes merge; users can return to Stable at
+any time. Installations from before Sparkle support require this one
 final manual download; automatic updates begin after that version is installed.
 
 Release pages also provide a ZIP and SHA-256 checksums. See
