@@ -836,6 +836,7 @@ public actor CodexInstanceController {
     private let closeTimeout: Duration
     private let closePollInterval: Duration
     private let launchValidationTimeout: Duration
+    private let windowPresentationTimeout: Duration
     private let processTreeProvider: any ProcessTreeSnapshotProviding
     private let processIdentitySignaler: any ProcessIdentitySignaling
     private let kernelStartKeyProvider: @Sendable (Int32) -> String?
@@ -849,6 +850,7 @@ public actor CodexInstanceController {
         closeTimeout: Duration = .seconds(5),
         closePollInterval: Duration = .milliseconds(100),
         launchValidationTimeout: Duration = .seconds(2),
+        windowPresentationTimeout: Duration = .seconds(10),
         processTreeProvider: any ProcessTreeSnapshotProviding = SystemProcessTreeSnapshotProvider(),
         processIdentitySignaler: (any ProcessIdentitySignaling)? = nil,
         kernelStartKeyProvider: (@Sendable (Int32) -> String?)? = nil
@@ -861,6 +863,7 @@ public actor CodexInstanceController {
         self.closeTimeout = closeTimeout
         self.closePollInterval = closePollInterval
         self.launchValidationTimeout = launchValidationTimeout
+        self.windowPresentationTimeout = windowPresentationTimeout
         self.processTreeProvider = processTreeProvider
         self.processIdentitySignaler = processIdentitySignaler
             ?? SystemProcessIdentitySignaler(snapshotProvider: processTreeProvider)
@@ -1266,7 +1269,7 @@ public actor CodexInstanceController {
 
     private func waitForPresentedWindow(processID: Int32) async throws -> Bool {
         let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: launchValidationTimeout)
+        let deadline = clock.now.advanced(by: windowPresentationTimeout)
         while clock.now < deadline {
             try Task.checkCancellation()
             if lifecycleController.isPresentingWindow(processID: processID) {
