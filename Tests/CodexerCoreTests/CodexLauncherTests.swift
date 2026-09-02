@@ -358,13 +358,14 @@ final class CodexLauncherTests: XCTestCase {
     func testOpenStopsFreshInstanceThatDoesNotPresentAWindow() async throws {
         let profile = makeProfile(slug: "windowless")
         try prepareIsolationLayout(for: profile)
-        let lifecycle = WindowlessLifecycleController(processID: 742)
+        let lifecycle = PresentationLifecycleController(processID: 742)
         let controller = CodexInstanceController(
             validator: AcceptingValidator(),
             processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
             workspaceLauncher: RecordingWorkspaceLauncher(processID: 742),
             lifecycleController: lifecycle,
-            launchValidationTimeout: .milliseconds(1)
+            launchValidationTimeout: .milliseconds(1),
+            windowPresentationTimeout: .milliseconds(1)
         )
 
         do {
@@ -383,11 +384,37 @@ final class CodexLauncherTests: XCTestCase {
         XCTAssertEqual(lifecycle.terminatedProcessIDs, [742])
     }
 
+    func testOpenAllowsWindowPresentationToOutlastLaunchValidation() async throws {
+        let profile = makeProfile(slug: "slow-window")
+        try prepareIsolationLayout(for: profile)
+        let lifecycle = PresentationLifecycleController(
+            processID: 744,
+            hiddenWindowChecks: 2
+        )
+        let controller = CodexInstanceController(
+            validator: AcceptingValidator(),
+            processSnapshotProvider: FixedProcessSnapshotProvider(snapshot: ""),
+            workspaceLauncher: RecordingWorkspaceLauncher(processID: 744),
+            lifecycleController: lifecycle,
+            launchValidationTimeout: .milliseconds(1),
+            windowPresentationTimeout: .milliseconds(250)
+        )
+
+        let outcome = try await controller.open(
+            profile: profile,
+            codexAppURL: configuration(for: profile).codexAppURL
+        )
+
+        XCTAssertEqual(outcome, .launched(processID: 744))
+        XCTAssertGreaterThanOrEqual(lifecycle.windowCheckCount, 3)
+        XCTAssertTrue(lifecycle.terminatedProcessIDs.isEmpty)
+    }
+
     func testCancellingWindowPresentationStopsFreshInstance() async throws {
         let profile = makeProfile(slug: "cancelled-window")
         try prepareIsolationLayout(for: profile)
         let presentationRequested = expectation(description: "presentation requested")
-        let lifecycle = WindowlessLifecycleController(processID: 743) {
+        let lifecycle = PresentationLifecycleController(processID: 743) {
             presentationRequested.fulfill()
         }
         let controller = CodexInstanceController(
@@ -1364,14 +1391,21 @@ private final class RejectingLaunchedProcessController: CodexApplicationLifecycl
     }
 }
 
-private final class WindowlessLifecycleController: CodexApplicationLifecycleControlling, @unchecked Sendable {
+private final class PresentationLifecycleController: CodexApplicationLifecycleControlling, @unchecked Sendable {
     let processID: Int32
     private(set) var presentationRequests: [Int32] = []
     private(set) var terminatedProcessIDs: [Int32] = []
+    private(set) var windowCheckCount = 0
+    private let hiddenWindowChecks: Int?
     private let onPresentationRequested: () -> Void
 
-    init(processID: Int32, onPresentationRequested: @escaping () -> Void = {}) {
+    init(
+        processID: Int32,
+        hiddenWindowChecks: Int? = nil,
+        onPresentationRequested: @escaping () -> Void = {}
+    ) {
         self.processID = processID
+        self.hiddenWindowChecks = hiddenWindowChecks
         self.onPresentationRequested = onPresentationRequested
     }
 
@@ -1392,7 +1426,9 @@ private final class WindowlessLifecycleController: CodexApplicationLifecycleCont
     }
 
     func isPresentingWindow(processID _: Int32) -> Bool {
-        false
+        windowCheckCount += 1
+        guard let hiddenWindowChecks else { return false }
+        return windowCheckCount > hiddenWindowChecks
     }
 
     func terminate(
